@@ -80,6 +80,7 @@ university-timetable-system/
 │   ├── constraints.cypher        uniqueness constraints and indexes
 │   └── queries.cypher            the documented queries (single source of truth)
 ├── app/streamlit_app.py          the web UI
+├── docs/er-diagram-chen.png      the Chen ER diagram as a rendered image
 ├── docker/mysql/00_app_user.sh   creates the app DB user inside the container
 ├── tools/
 │   ├── make_seed.py              regenerates sql/03_seed_data.sql (optional)
@@ -496,6 +497,8 @@ flowchart TB
 ```
 
 *Chen notation: rectangles are entities, diamonds are relationships, ovals are attributes (key attributes underlined). Edge labels give the cardinality; a thick line means total participation (every Faculty, Course, Section and Student must belong to one). `Takes` is the `Section_Course` table added by migration M1; `Scheduled_In` is stored as the `Timetable` table.*
+
+Rendered image: [`docs/er-diagram-chen.png`](docs/er-diagram-chen.png) (for slides, reports or viewers without Mermaid).
 
 *(In the original drawing, Offered_By and Belongs_To appear to attach to Faculty; the relational schema
 in the PDF uses `dept_id` on Course and Section, which is what this project follows.)*
