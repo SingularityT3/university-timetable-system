@@ -12,7 +12,6 @@
 *.key
 *.crt
 secrets.toml
-.streamlit/secrets.toml
 credentials.json
 
 # ---- Python -----------------------------------------------------------
@@ -71,9 +70,11 @@ nosetests.xml
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# ---- Streamlit -----------------------------------------------------------
-.streamlit/cache/
-.streamlit/*.log
+# ---- Node.js / Next.js (web/ also has its own .gitignore) -----------------
+node_modules/
+.next/
+*.tsbuildinfo
+npm-debug.log*
 
 # ---- Docker volumes and local database data -------------------------------
 # docker-compose bind mounts / data folders (named volumes live outside the repo)

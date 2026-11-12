@@ -11,7 +11,6 @@ app uses). Neo4j tests skip themselves when Neo4j is not running / not loaded.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -26,17 +25,6 @@ import generator  # noqa: E402
 import utils  # noqa: E402
 
 TEST_YEAR = "2099-2100"          # VARCHAR(9); never used for real data
-
-
-def pytest_collection_modifyitems(config, items):
-    """UI tests (Streamlit AppTest imports pandas) are opt-in."""
-    if os.environ.get("RUN_UI_TESTS") == "1":
-        return
-    skip = pytest.mark.skip(reason="UI tests are opt-in: set RUN_UI_TESTS=1 "
-                                   "(from a normal terminal, not the Flatpak VS Code one)")
-    for item in items:
-        if "ui" in item.keywords:
-            item.add_marker(skip)
 
 
 @pytest.fixture
