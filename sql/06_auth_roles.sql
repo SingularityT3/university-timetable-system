@@ -16,7 +16,7 @@
 -- the application had a bug. AppUser itself is read by the service account
 -- (MYSQL_USER) at login time.
 --
--- Demo logins (passwords hashed with `python -m api.auth hash <password>`):
+-- Demo logins (passwords hashed with `npm run hash-password -- <password>`):
 --     admin    / admin123     admin
 --     faculty1 / faculty123   faculty, faculty_id 1  (CSE)
 --     faculty2 / faculty123   faculty, faculty_id 11 (ECE)

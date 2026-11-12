@@ -1,4 +1,4 @@
-/** Pure helpers of lib/server/utils.ts (port of the helper parts of tests/test_utils.py). No database needed. */
+/** Pure helpers of lib/server/utils.ts. No database needed. */
 import { describe, expect, it } from "vitest";
 import {
   DAY_ORDER, buildSlotLinks, buildWeekGrid, deptCode, describeMysqlError, fmtTime, formatTable, toMinutes,

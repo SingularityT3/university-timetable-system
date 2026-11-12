@@ -1,4 +1,4 @@
-/** Neo4j preconditions for the server tests (port of the neo4j_session / graph_loaded fixtures). */
+/** Neo4j preconditions for the server tests (Neo4j reachable, graph loaded). */
 import { getDriver, neo4jDownReason, nodeCounts } from "@/lib/server/neo4j";
 
 /**

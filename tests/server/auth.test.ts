@@ -33,9 +33,9 @@ describe("passwords", () => {
       expect(verifyPassword("anything", stored)).toBe(false);
   });
 
-  it("matches the hashes the Python code made (same format and algorithm)", () => {
+  it("uses the stored format of the seeded hashes in sql/06 (same algorithm and encoding)", () => {
     const salt = Buffer.from("0123456789abcdef");
-    // python: auth.hash_password("pw", 1000, b"0123456789abcdef")
+    // reference value: PBKDF2-HMAC-SHA256("pw", salt "0123456789abcdef", 1000 iterations), base64url without padding
     expect(hashPassword("pw", 1000, salt)).toBe("pbkdf2_sha256$1000$MDEyMzQ1Njc4OWFiY2RlZg$g4BiOBrcHGnGTAdCcoA-WrLOFA69L2c9HA5vVpt2o7A");
   });
 
@@ -71,8 +71,8 @@ describe("session tokens", () => {
     expect(readToken(token, SECRET, 2_000_000)).toBeNull();
   });
 
-  it("is the same token format as the Python API", () => {
-    // python: auth.make_token({"user_id": 7, "role": "faculty", "faculty_id": 3}, "unit-test-secret", now=1_000_000)
+  it("keeps the documented token format (base64url JSON body + HMAC-SHA256)", () => {
+    // reference value for user 7 / faculty 3, secret "unit-test-secret", issued at t = 1 000 000 s, 8 h lifetime
     expect(makeToken(USER, SECRET, 8 * 3600, 1_000_000)).toBe(
       "eyJ1aWQiOjcsInJvbGUiOiJmYWN1bHR5IiwiZmlkIjozLCJleHAiOjEwMjg4MDB9.ldSRTEFkJ9Mb5e7L8lv8sGXIDLjuSjIoLe9JrloCoCE");
   });

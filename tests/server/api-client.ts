@@ -1,6 +1,6 @@
 /**
  * Calls the route handlers in app/api/** directly (no server), keeping cookies between calls
- * like a browser (or FastAPI's TestClient in the old tests).
+ * like a browser.
  */
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";

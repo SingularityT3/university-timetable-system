@@ -11,6 +11,6 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // everything except the login page, the API proxy, Next.js internals and static files
+  // everything except the login page, the API routes (they check the session themselves), Next.js internals and static files
   matcher: ["/((?!login|api/|_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|ico|css|js)$).*)"],
 };

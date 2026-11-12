@@ -1,4 +1,4 @@
-/** Response shapes of the FastAPI backend (see the API contract in the port plan). */
+/** Response shapes of the JSON API (the route handlers in app/api/). */
 
 export type Row = Record<string, unknown>;
 export type Role = "admin" | "faculty";

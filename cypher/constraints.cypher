@@ -1,6 +1,6 @@
 // =====================================================================
-// constraints.cypher  --  run BEFORE loading data (neo4j_etl.py does this
-// automatically). Every statement is idempotent (IF NOT EXISTS).
+// constraints.cypher  --  run BEFORE loading data (the ETL, npm run etl,
+// does this automatically). Every statement is idempotent (IF NOT EXISTS).
 //
 // Manual run with the tarball's shell:
 //     bin/cypher-shell -u neo4j -p <password> -f cypher/constraints.cypher

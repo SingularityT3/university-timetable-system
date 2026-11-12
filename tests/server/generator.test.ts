@@ -1,5 +1,5 @@
 /**
- * The scheduler (port of tests/test_generator.py). Results are re-validated by an INDEPENDENT checker
+ * The scheduler. Results are re-validated by an INDEPENDENT checker
  * written here from the raw tables (not by generator internals), and by the database's own audit
  * procedures. Writes only touch TEST_YEAR or happen in rolled-back transactions.
  */

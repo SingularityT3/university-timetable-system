@@ -21,7 +21,7 @@ describe("db", () => {
   });
 });
 
-// db.ts helpers with stand-in connection objects (port of test_db.py)
+// db.ts helpers with stand-in connection objects
 describe("db helpers without a database", () => {
   const fakeConn = () => {
     const calls: string[] = [];

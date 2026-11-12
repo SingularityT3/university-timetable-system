@@ -1,4 +1,4 @@
-/** Typed fetch wrapper for the FastAPI backend (proxied at /api by next.config.ts). */
+/** Typed fetch wrapper for the JSON API (the route handlers in app/api/, same origin). */
 
 import { go } from "./nav";
 
@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-/** FastAPI returns {detail: string} or, for validation errors, {detail: [{msg, loc}]}. */
+/** Errors are {detail: string} or, for validation errors, {detail: [{msg, loc}]}. */
 function detailOf(body: unknown, fallback: string): string {
   const d = (body as { detail?: unknown } | null)?.detail;
   if (typeof d === "string") return d;

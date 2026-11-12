@@ -67,7 +67,7 @@ describe("auth", () => {
     expect(c.cookies.has(COOKIE)).toBe(false);
   });
 
-  it("a malformed login body is 422 with FastAPI's list detail", async () => {
+  it("a malformed login body is 422 with a list detail [{loc, msg, type}]", async () => {
     const r = await new Client().post("/auth/login", { username: "admin" });
     expect(r.status).toBe(422);
     expect(r.body.detail).toEqual([{ type: "missing", loc: ["body", "password"], msg: "Field required", input: { username: "admin" } }]);
@@ -276,9 +276,10 @@ describe("admin actions", () => {
 
 describe("Neo4j routes", () => {
   it("Neo4j down gives 503", async () => {
-    const saved = process.env.NEO4J_URI;
+    const saved = { uri: process.env.NEO4J_URI, password: process.env.NEO4J_PASSWORD };
     await closeDriver();
     process.env.NEO4J_URI = "bolt://127.0.0.1:1";
+    process.env.NEO4J_PASSWORD ||= "not-used"; // configured but unreachable (CI's MariaDB job sets no password)
     try {
       const r = await admin.get("/graph/nodes?label=Faculty");
       expect(r.status).toBe(503);
@@ -287,7 +288,10 @@ describe("Neo4j routes", () => {
       expect((await admin.get("/meta")).body.neo4j).toEqual({ ok: false, detail: "ServiceUnavailable" });
       expect((await admin.get("/stats")).body.graph.error).toContain("Neo4j is not reachable");
     } finally {
-      process.env.NEO4J_URI = saved;
+      for (const [name, value] of [["NEO4J_URI", saved.uri], ["NEO4J_PASSWORD", saved.password]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
       await closeDriver();
     }
   });

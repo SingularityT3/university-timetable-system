@@ -1,5 +1,5 @@
 /**
- * Shared fixtures for the server tests (port of tests/conftest.py).
+ * Shared fixtures for the server tests.
  *
  * SAFETY RULE: tests never modify real data. Everything that writes uses the throw-away
  * academic year TEST_YEAR (wiped before and after), or runs inside a transaction that is

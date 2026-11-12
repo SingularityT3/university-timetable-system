@@ -1,6 +1,6 @@
 /**
- * The Cypher query file, the query wrappers' own logic and the Neo4j settings
- * (the Neo4j parts of test_utils.py). No server: the reads/writes are stood in for.
+ * The Cypher query file, the query wrappers' own logic and the Neo4j settings.
+ * No server: the reads/writes are stood in for.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,7 +123,7 @@ describe("query logic outside Cypher", () => {
 });
 
 describe("settings and driver", () => {
-  it("parses .env files like the Python helper", () => {
+  it("parses .env files (comments, quotes, empty values, = inside values)", () => {
     const dir = mkdtempSync(join(tmpdir(), "tt-env-"));
     writeFileSync(join(dir, ".env"), '# comment\nA=1\nB = "two"\n\nC=\nnot a setting\nD=x=y\n');
     expect(NQ.readEnvFile(join(dir, ".env"))).toEqual({ A: "1", B: "two", C: "", D: "x=y" });

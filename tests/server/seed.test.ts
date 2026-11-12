@@ -1,4 +1,4 @@
-/** sql/03_seed_data.sql must be exactly what scripts/make-seed.ts writes (port of the check in test_project_files.py). */
+/** sql/03_seed_data.sql must be exactly what scripts/make-seed.ts writes. */
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

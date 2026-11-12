@@ -1,5 +1,5 @@
 /**
- * Substitute assignment (assignSubstitute / revertSubstitution; port of tests/test_substitutes.py).
+ * Substitute assignment (assignSubstitute / revertSubstitution).
  * These tests COMMIT (the functions are transactional by design), so they only touch TEST_YEAR
  * classes; any Teaches row they add is removed afterwards.
  */

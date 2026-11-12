@@ -1,5 +1,5 @@
 /**
- * Database rules (port of tests/test_schema.py): the schema, constraints, composite foreign keys and
+ * Database rules: the schema, constraints, composite foreign keys and
  * triggers must REJECT invalid data. Every insert runs inside a rolled-back transaction and uses
  * TEST_YEAR, so real data is never touched.
  */
