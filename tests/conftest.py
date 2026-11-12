@@ -3,7 +3,8 @@ Shared pytest fixtures for the timetable project.
 
 SAFETY RULE: tests never modify your real data. Everything that writes uses the
 throw-away academic year TEST_YEAR (cleaned before and after), or runs inside a
-transaction that is rolled back. The Neo4j tests only READ.
+transaction that is rolled back. The Neo4j tests only READ, except the
+unavailability-mark tests, which create their own mark and delete it again.
 
 Requirements: MySQL/MariaDB reachable with the settings in .env (the same ones the
 app uses). Neo4j tests skip themselves when Neo4j is not running / not loaded.
@@ -18,6 +19,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT))          # the `api` package
 
 import db  # noqa: E402  (also loads .env)
 import generator  # noqa: E402

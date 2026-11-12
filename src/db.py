@@ -10,6 +10,12 @@ utils.load_env):
     MYSQL_DATABASE     default university_timetable
     MYSQL_UNIX_SOCKET  optional; if set, connect through this socket instead
                        of TCP (handy for a local MariaDB/MySQL install)
+
+Role accounts (used by the web API, see sql/06_auth_roles.sql):
+    MYSQL_ADMIN_USER / MYSQL_ADMIN_PASSWORD      account holding the SQL role tt_admin
+    MYSQL_FACULTY_USER / MYSQL_FACULTY_PASSWORD  account holding the SQL role tt_faculty
+connect(role="admin" | "faculty") logs in as that account and runs SET ROLE, so the
+session has exactly that role's privileges. role=None uses the service account above.
 """
 from __future__ import annotations
 
@@ -23,33 +29,60 @@ import utils
 utils.load_env()
 
 
-def connect(autocommit: bool = False):
-    """Open a new connection. autocommit=False so callers control transactions."""
-    user = os.environ.get("MYSQL_USER")
-    if not user:
-        raise RuntimeError(
-            "MYSQL_USER is not set. Copy .env.example to .env and fill it in "
-            "(or export the MYSQL_* variables).")
-    params = dict(
-        user=user,
-        password=os.environ.get("MYSQL_PASSWORD", ""),
-        database=os.environ.get("MYSQL_DATABASE", "university_timetable"),
-        autocommit=autocommit,
-        charset="utf8mb4",
-    )
+# role -> (user variable, default user, password variable, SQL role)
+ROLE_ACCOUNTS = {
+    "admin": ("MYSQL_ADMIN_USER", "tt_admin_app", "MYSQL_ADMIN_PASSWORD", "tt_admin"),
+    "faculty": ("MYSQL_FACULTY_USER", "tt_faculty_app", "MYSQL_FACULTY_PASSWORD", "tt_faculty"),
+}
+
+
+def connect(autocommit: bool = False, role: str | None = None):
+    """
+    Open a new connection. autocommit=False so callers control transactions.
+    role=None: the service account (MYSQL_USER). role="admin"/"faculty": that role's account,
+    with the SQL role activated (SET ROLE) before the database is selected.
+    """
+    if role is None:
+        user = os.environ.get("MYSQL_USER")
+        if not user:
+            raise RuntimeError(
+                "MYSQL_USER is not set. Copy .env.example to .env and fill it in "
+                "(or export the MYSQL_* variables).")
+        password = os.environ.get("MYSQL_PASSWORD", "")
+    elif role in ROLE_ACCOUNTS:
+        user_var, default_user, password_var, _ = ROLE_ACCOUNTS[role]
+        user, password = os.environ.get(user_var, default_user), os.environ.get(password_var, "")
+    else:
+        raise ValueError(f"role must be None, 'admin' or 'faculty', got {role!r}")
+    database = os.environ.get("MYSQL_DATABASE", "university_timetable")
+    params = dict(user=user, password=password, autocommit=autocommit, charset="utf8mb4")
+    if role is None:
+        params["database"] = database
     sock = os.environ.get("MYSQL_UNIX_SOCKET")
     if sock:
         params["unix_socket"] = sock
     else:
         params["host"] = os.environ.get("MYSQL_HOST", "127.0.0.1")
         params["port"] = int(os.environ.get("MYSQL_PORT", "3306"))
-    return mysql.connector.connect(**params)
+    conn = mysql.connector.connect(**params)
+    if role is not None:
+        # A role account has no privileges until its role is active, so it cannot even
+        # select the database at login: activate the role first, then USE the database.
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SET ROLE {ROLE_ACCOUNTS[role][3]}")
+            cur.execute(f"USE `{database}`")
+            cur.close()
+        except Exception:
+            conn.close()
+            raise
+    return conn
 
 
 @contextmanager
-def connection(autocommit: bool = False):
+def connection(autocommit: bool = False, role: str | None = None):
     """`with connection() as conn:` -- always closes the connection."""
-    conn = connect(autocommit=autocommit)
+    conn = connect(autocommit=autocommit, role=role)
     try:
         yield conn
     finally:

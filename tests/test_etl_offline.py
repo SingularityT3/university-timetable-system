@@ -153,3 +153,11 @@ def test_cli_explains_an_unreachable_neo4j(monkeypatch, capsys):
     monkeypatch.setenv("NEO4J_PASSWORD", "irrelevant")
     assert E.main(["--year", "2001-2002"]) == 2
     assert "Could not use Neo4j" in capsys.readouterr().err
+
+
+def test_etl_never_deletes_unavailability_marks(conn, year):
+    """UNAVAILABLE_AT marks live only in Neo4j: every delete the ETL sends names another relationship type."""
+    deletes = [q for q, _ in run_all(conn, year) if "DELETE" in q]
+    assert deletes and all("UNAVAILABLE_AT" not in q and "DETACH" not in q for q in deletes)
+    assert all(re.search(r"\[\w+:(\w+)", q) for q in deletes)                     # always a typed pattern
+    assert "UNAVAILABLE_AT" not in E.REL_ENDPOINTS

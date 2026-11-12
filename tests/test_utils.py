@@ -105,7 +105,8 @@ def test_format_table_and_dept_code():
 EXPECTED_QUERIES = {"impact_analysis", "substitute_finder", "most_conflicted_courses", "free_rooms",
                     "heaviest_day_students", "faculty_shortest_path", "faculty_workload",
                     "move_class_ripple", "cross_department_teaching", "course_conflict_neighbours",
-                    "node_counts", "relationship_counts"}
+                    "node_counts", "relationship_counts", "node_browser", "node_neighbours",
+                    "faculty_unavailability", "set_unavailability", "delete_unavailability"}
 
 
 def test_all_documented_queries_are_loaded():
@@ -117,6 +118,8 @@ def test_all_documented_queries_are_loaded():
 def test_every_wrapper_passes_exactly_the_parameters_its_query_uses(monkeypatch):
     calls = []
     monkeypatch.setattr(NQ, "run_query", lambda name, params=None, session=None: calls.append((name, dict(params or {}))) or [])
+    monkeypatch.setattr(NQ, "run_write", lambda name, params=None: calls.append((name, dict(params or {})))
+                        or [{"deleted": 0}])
     NQ.impact_analysis(1, "2026-2027", "mon")
     NQ.substitute_finder(1)
     NQ.most_conflicted_courses()
@@ -128,12 +131,36 @@ def test_every_wrapper_passes_exactly_the_parameters_its_query_uses(monkeypatch)
     NQ.course_conflict_neighbours("CS301")
     NQ.node_counts()
     NQ.relationship_counts()
+    NQ.browse_nodes("Faculty", "dr")
+    NQ.node_neighbours("Course", "CS301")
+    NQ.list_unavailability(1)
+    NQ.set_unavailability(1, 5, "conference")
+    NQ.delete_unavailability(1, 5)
     with pytest.raises(LookupError):
         NQ.move_class_ripple(1, "FRI", 8)
     assert {n for n, _ in calls} == EXPECTED_QUERIES
     for name, params in calls:
         used = set(re.findall(r"\$(\w+)", NQ.queries()[name]))
         assert used == set(params), name
+
+
+def test_graph_crud_wrappers_validate_their_input(monkeypatch):
+    calls = []
+    monkeypatch.setattr(NQ, "run_query", lambda name, params=None, session=None: calls.append(params) or [])
+    monkeypatch.setattr(NQ, "run_write", lambda name, params=None: [])
+    with pytest.raises(ValueError):
+        NQ.browse_nodes("Faculty; MATCH (n) DETACH DELETE n")        # labels come from a whitelist only
+    with pytest.raises(ValueError):
+        NQ.node_neighbours("Faculty", "abc")                          # Faculty keys are integers
+    with pytest.raises(ValueError):
+        NQ.set_unavailability(1, 5, "x" * (NQ.MAX_REASON + 1))
+    with pytest.raises(LookupError):
+        NQ.set_unavailability(1, 999, "unknown slot")                 # no row back = unknown faculty/slot
+    NQ.browse_nodes("Course", "   ", 10_000)
+    NQ.node_neighbours("Course", 301)
+    NQ.node_neighbours("TimeSlot", "7")
+    assert calls[0] == {"label": "Course", "search": None, "limit": 500}
+    assert calls[1]["key"] == "301" and calls[2]["key"] == 7
 
 
 @pytest.mark.skipif(shutil.which("cypher-lint") is None, reason="optional: install 'cypher-lint' to syntax-check Cypher")

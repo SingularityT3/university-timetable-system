@@ -22,12 +22,18 @@
 //                          (Section)-[:TAKES]->(Course)             from Section_Course
 //                          (Faculty)-[:TEACHES_SECTION {academic_year, course_id, periods}]->(Section)
 //                                                           derived from the timetable
+//                  app:    (Faculty)-[:UNAVAILABLE_AT {reason, updated_at}]->(TimeSlot)
+//                                                           written by the web app, not by the ETL
+//                                                           (the ETL keeps it; --reset wipes it)
 //
 // Running in Neo4j Browser: set the parameters first, e.g.
 //     :param faculty_id => 1
 //     :param academic_year => '2026-2027'
 //     :param day => null
-// then paste one query. Everything is Cypher 5 and read-only.
+// then paste one query. Everything is Cypher 5. All queries are read-only
+// EXCEPT set_unavailability and delete_unavailability (the graph's create/
+// update/delete of UNAVAILABLE_AT marks; src/neo4j_queries.py runs those two
+// in write transactions).
 // =====================================================================
 
 
@@ -57,7 +63,8 @@ ORDER BY day_no, period;
 
 // @query substitute_finder
 // Q2. SUBSTITUTE FINDER: for every class of an absent faculty member, list
-//     colleagues from the SAME DEPARTMENT who are FREE in that slot and are
+//     colleagues from the SAME DEPARTMENT who are FREE in that slot (no class
+//     there and not marked UNAVAILABLE_AT it) and are
 //     either
 //       QUALIFIED = listed in Teaches for the very same course (can be
 //                   assigned directly; the MySQL foreign key allows it), or
@@ -73,6 +80,7 @@ WHERE s.faculty_id = absent.faculty_id
   AND ($day IS NULL OR s.day_of_week = $day)
 MATCH (cand:Faculty)-[:WORKS_IN]->(dept)
 WHERE cand.faculty_id <> absent.faculty_id
+  AND NOT EXISTS { (cand)-[:UNAVAILABLE_AT]->(:TimeSlot {slot_id: s.slot_id}) }
 OPTIONAL MATCH (cand)-[tq:TEACHES]->(c)
 OPTIONAL MATCH (cand)-[:TEACHES]->(rc:Course)-[:CONFLICTS_WITH]-(c)
 WITH c, s, sec, cand, tq, collect(DISTINCT rc.course_id) AS related_courses
@@ -265,3 +273,97 @@ ORDER BY label;
 MATCH ()-[r]->()
 RETURN type(r) AS rel_type, count(*) AS relationships
 ORDER BY rel_type;
+
+
+// ---------------------------------------------------------------------
+// GRAPH BROWSER AND FACULTY UNAVAILABILITY (read, create/update, delete)
+// Used by the web app's Graph page. Key and display name per label:
+//   Department dept_id / dept_name      Faculty   faculty_id / name
+//   Course     course_id / course_name  Section   section_id / label
+//   Student    student_id / name        Classroom room_id / building-room_no
+//   TimeSlot   slot_id / 'MON P1'
+// ---------------------------------------------------------------------
+
+// @query node_browser
+// Q13. NODE BROWSER (read): nodes of one label, optionally filtered by a
+//      case-insensitive search on the key or display name, with their degree.
+// Params: $label STRING (one of the 7 labels; validated in Python),
+//         $search STRING or null, $limit INT
+MATCH (n)
+WHERE $label IN labels(n)
+WITH n, n[{Department: 'dept_id', Faculty: 'faculty_id', Course: 'course_id', Section: 'section_id',
+           Student: 'student_id', Classroom: 'room_id', TimeSlot: 'slot_id'}[$label]] AS id,
+     coalesce(n.name, n.dept_name, n.course_name, n.label,
+              n.building + '-' + n.room_no, n.day_of_week + ' P' + toString(n.period_no)) AS name
+WHERE $search IS NULL
+   OR toLower(toString(id)) CONTAINS toLower($search)
+   OR toLower(name) CONTAINS toLower($search)
+RETURN id, name, properties(n) AS properties, size([(n)--() | 1]) AS degree
+ORDER BY id
+LIMIT $limit;
+
+
+// @query node_neighbours
+// Q14. NEIGHBOURS OF ONE NODE (read): every relationship of the node, its
+//      type and direction (OUT = starts at this node) and the node at the other end.
+// Params: $label STRING, $key INT (STRING for Course and Student), $limit INT
+WITH {Department: 'dept_id', Faculty: 'faculty_id', Course: 'course_id', Section: 'section_id',
+      Student: 'student_id', Classroom: 'room_id', TimeSlot: 'slot_id'} AS keys
+MATCH (n)
+WHERE $label IN labels(n) AND n[keys[$label]] = $key
+MATCH (n)-[r]-(m)
+WITH keys, n, r, m, labels(m)[0] AS label
+RETURN type(r) AS relationship,
+       CASE WHEN startNode(r) = n THEN 'OUT' ELSE 'IN' END AS direction,
+       label,
+       m[keys[label]] AS key,
+       coalesce(m.name, m.dept_name, m.course_name, m.label,
+                m.building + '-' + m.room_no, m.day_of_week + ' P' + toString(m.period_no)) AS name,
+       properties(r) AS properties
+ORDER BY relationship, label, name
+LIMIT $limit;
+
+
+// @query faculty_unavailability
+// Q15. UNAVAILABILITY MARKS (read): slots a faculty member is marked
+//      unavailable in (every faculty member when $faculty_id is null).
+// Params: $faculty_id INT or null
+MATCH (f:Faculty)-[u:UNAVAILABLE_AT]->(t:TimeSlot)
+WHERE $faculty_id IS NULL OR f.faculty_id = $faculty_id
+RETURN f.faculty_id AS faculty_id,
+       f.name AS faculty,
+       t.slot_id AS slot_id,
+       t.day_of_week AS day,
+       t.period_no AS period,
+       t.start_time AS start_time,
+       t.end_time AS end_time,
+       u.reason AS reason,
+       toString(u.updated_at) AS updated_at
+ORDER BY faculty, t.day_no, period;
+
+
+// @query set_unavailability
+// Q16. MARK UNAVAILABLE (create or update; WRITE): MERGE creates the mark
+//      once, running it again only changes the reason and the timestamp.
+//      No row returned = unknown faculty or slot.
+// Params: $faculty_id INT, $slot_id INT, $reason STRING
+MATCH (f:Faculty {faculty_id: $faculty_id}), (t:TimeSlot {slot_id: $slot_id})
+MERGE (f)-[u:UNAVAILABLE_AT]->(t)
+SET u.reason = $reason, u.updated_at = datetime()
+RETURN f.faculty_id AS faculty_id,
+       f.name AS faculty,
+       t.slot_id AS slot_id,
+       t.day_of_week AS day,
+       t.period_no AS period,
+       t.start_time AS start_time,
+       t.end_time AS end_time,
+       u.reason AS reason,
+       toString(u.updated_at) AS updated_at;
+
+
+// @query delete_unavailability
+// Q17. REMOVE A MARK (delete; WRITE). Returns how many marks were deleted (0 or 1).
+// Params: $faculty_id INT, $slot_id INT
+OPTIONAL MATCH (:Faculty {faculty_id: $faculty_id})-[u:UNAVAILABLE_AT]->(:TimeSlot {slot_id: $slot_id})
+DELETE u
+RETURN count(u) AS deleted;

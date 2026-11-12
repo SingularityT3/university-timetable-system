@@ -1,6 +1,7 @@
 """
 Tests against a RUNNING Neo4j whose graph was loaded by `python src/neo4j_etl.py`.
-They only READ. If Neo4j is down or the graph is empty they skip themselves.
+They only READ, except the unavailability tests: those create their own UNAVAILABLE_AT
+mark and always delete it again. If Neo4j is down or the graph is empty they skip themselves.
 """
 import pytest
 
@@ -75,3 +76,56 @@ def test_ripple_flags_a_section_clash(conn, year, graph_loaded):
     assert not r["free_move"]
     hit = next(c for c in r["clashes"] if c["clash_timetable_id"] == b["timetable_id"])
     assert "SECTION" in hit["clash_types"] and r["students_displaced"] >= 12
+
+
+def free_mark(faculty_id: int) -> int:
+    """A slot this faculty member has no unavailability mark on (so the test owns the mark it makes)."""
+    taken = {m["slot_id"] for m in NQ.list_unavailability(faculty_id)}
+    return next(s for s in range(48, 0, -1) if s not in taken)
+
+
+def test_unavailability_mark_create_update_delete(graph_loaded):
+    fid = 19
+    slot = free_mark(fid)
+    try:
+        made = NQ.set_unavailability(fid, slot, "  Conference  ")
+        assert (made["faculty_id"], made["slot_id"], made["reason"]) == (fid, slot, "Conference")
+        NQ.set_unavailability(fid, slot, "Medical leave")                  # MERGE: update, not a second mark
+        mine = [m for m in NQ.list_unavailability(fid) if m["slot_id"] == slot]
+        assert [m["reason"] for m in mine] == ["Medical leave"] and mine[0]["updated_at"]
+        assert any(m["faculty_id"] == fid and m["slot_id"] == slot for m in NQ.list_unavailability())
+        with pytest.raises(LookupError):
+            NQ.set_unavailability(fid, 10_000, "no such slot")
+    finally:
+        assert NQ.delete_unavailability(fid, slot) == 1
+    assert NQ.delete_unavailability(fid, slot) == 0
+    assert all(m["slot_id"] != slot for m in NQ.list_unavailability(fid))
+
+
+def test_substitute_finder_skips_a_colleague_marked_unavailable(conn, year, graph_loaded):
+    rows = NQ.substitute_finder(1, year)
+    if not rows:
+        pytest.skip("faculty 1 has no substitute candidates")
+    cls, cand = rows[0]["timetable_id"], rows[0]["candidate_id"]
+    slot = db.query(conn, "SELECT slot_id FROM Timetable WHERE timetable_id = %s", (cls,))[0]["slot_id"]
+    assert all(m["slot_id"] != slot for m in NQ.list_unavailability(cand))   # so the mark below is ours
+    try:
+        NQ.set_unavailability(cand, slot, "test: unavailable")
+        after = NQ.substitute_finder(1, year)
+        assert not any(r["timetable_id"] == cls and r["candidate_id"] == cand for r in after)
+        assert len(after) == len(rows) - 1                                  # nothing else changed
+    finally:
+        NQ.delete_unavailability(cand, slot)
+    assert any(r["timetable_id"] == cls and r["candidate_id"] == cand for r in NQ.substitute_finder(1, year))
+
+
+def test_node_browser_and_neighbours(conn, graph_loaded):
+    n_faculty = db.query(conn, "SELECT COUNT(*) AS n FROM Faculty")[0]["n"]
+    assert len(NQ.browse_nodes("Faculty", None, 500)) == n_faculty
+    rooms = NQ.browse_nodes("Classroom", "lab", 500)
+    assert rooms and all("lab" in r["name"].lower() for r in rooms)
+    fac = NQ.browse_nodes("Faculty", None, 1)[0]
+    nb = NQ.node_neighbours("Faculty", fac["id"], 500)
+    assert len(nb) == fac["degree"]
+    assert {"relationship": "WORKS_IN", "direction": "OUT", "label": "Department"}.items() <= next(
+        r for r in nb if r["relationship"] == "WORKS_IN").items()
