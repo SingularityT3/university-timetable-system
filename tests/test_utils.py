@@ -222,3 +222,44 @@ def test_neo4j_driver_import_does_not_load_pandas_or_pyarrow():
     root = Path(__file__).resolve().parent.parent
     r = subprocess.run([__import__("sys").executable, "-c", code], cwd=root, capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.strip() == "ok", r.stdout + r.stderr
+
+
+def test_expected_neo4j_notices_are_dropped_and_others_kept():
+    """01G11 and the "UNAVAILABLE_AT does not exist yet" notices are expected; a typo warning is not."""
+    import logging
+    utils._silence_null_elimination_notice()
+    logger = logging.getLogger("neo4j.notifications")
+
+    def shown(msg: str) -> bool:
+        return logger.filter(logger.makeRecord(logger.name, logging.WARNING, __file__, 1, msg, None, None))
+
+    assert not shown("gql_status='01G11', null value eliminated in set function")
+    assert not shown("gql_status='01N51', The relationship type `UNAVAILABLE_AT` does not exist.")
+    assert not shown("gql_status='01N52', The property `reason` does not exist.")
+    assert shown("gql_status='01N51', The relationship type `TEACHEZ` does not exist.")
+    assert shown("gql_status='01N52', The property `nmae` does not exist.")
+
+
+def test_get_driver_drops_a_cached_driver_whose_server_went_away(monkeypatch):
+    """A dead cached driver is closed and rebuilt (or the error raised at once) instead of retrying for ~30 s."""
+    class Driver:
+        def __init__(self, up):
+            self.up, self.closed = up, False
+
+        def verify_connectivity(self):
+            if not self.up:
+                raise ConnectionError("down")
+
+        def close(self):
+            self.closed = True
+
+    dead = Driver(up=False)
+    monkeypatch.setattr(NQ, "_driver", dead)
+    monkeypatch.setattr(utils, "get_neo4j_driver", lambda: Driver(up=False))
+    with pytest.raises(ConnectionError):
+        NQ.get_driver()
+    assert dead.closed and NQ._driver is None
+
+    monkeypatch.setattr(utils, "get_neo4j_driver", lambda: Driver(up=True))
+    fresh = NQ.get_driver()
+    assert fresh.up and NQ.get_driver() is fresh          # reused while the server is up

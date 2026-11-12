@@ -899,7 +899,7 @@ substitute your own admin command, or use the `timetable` user.)
 | 14 | Roles bite | Log out, log in as `faculty1` / `faculty123` | Own timetable is shown; *Run generator* is not in the menu; no Assign buttons or unavailability form. `curl` to an admin route with that cookie → 403 |
 | 15 | Neo4j RUD | As admin: *Graph (Neo4j)* → mark a teacher unavailable in a slot they are free in; *Faculty absent* for a colleague teaching then | The marked teacher is no longer offered as a substitute for that slot; delete the mark and they are back |
 | 16 | Python test suite | `pytest` | see [Tests](#tests) for the expected summary line |
-| 17 | Web tests and build | `cd web && npm test && npm run build` | `27 passed`; build succeeds |
+| 17 | Web tests and build | `cd web && npm test && npm run build` | `28 passed`; build succeeds |
 
 ---
 
@@ -1003,12 +1003,12 @@ afterwards. The Neo4j tests only read, except the unavailability tests, which cr
 | `test_db.py` | `db.transaction` commits/rolls back, `db.call_procedure` works with both forms of mysql-connector's `stored_results`, a missing `MYSQL_USER` is reported (no database needed) |
 | `test_project_files.py` | Required files exist; every setting the code reads is in `.env.example`; `.env`, `node_modules/` and `.next/` are git-ignored; the requirements match the imports; `web/package.json` has the documented scripts; every SQL file is loaded by Docker and by CI; `sql/03_seed_data.sql` is byte-identical to what `tools/make_seed.py` generates; the README's options, links and file names are real |
 
-**Expected result on the bundled data** (164 Python tests):
+**Expected result on the bundled data** (166 Python tests):
 
 | Situation | Summary line |
 |---|---|
-| MySQL only (no Neo4j) | `150 passed, 14 skipped` |
-| + Neo4j running with the graph loaded | `163 passed, 1 skipped` |
+| MySQL only (no Neo4j) | `152 passed, 14 skipped` |
+| + Neo4j running with the graph loaded | `165 passed, 1 skipped` |
 
 The one remaining skip is `test_cypher_files_have_valid_syntax`, which needs the optional `cypher-lint` tool
 (Debian/Ubuntu: `sudo apt install cypher-lint`); with it installed that test runs too.
@@ -1016,7 +1016,7 @@ The one remaining skip is `test_cypher_files_have_valid_syntax`, which needs the
 Skips are explained in the summary (`-ra`): "Neo4j not reachable" or "graph is empty, run the ETL".
 Skipped is not failed, but it also means **not checked**: run the Neo4j tests at least once.
 
-**Web unit tests** (`web/tests/`, 27 tests in 9 files, `npm test`): the `WeekGrid` (break rows, lab colour,
+**Web unit tests** (`web/tests/`, 28 tests in 9 files, `npm test`): the `WeekGrid` (break rows, lab colour,
 lines), CSV quoting, `BarChart`, `DataTable`, the API client (JSON errors, redirect to `/login` on 401), the login
 page (submits, shows the error on a 401), the sidebar hiding admin links for faculty, the timetable page and the
 absent page (Assign disabled until the `Teaches` box is ticked). They mock `fetch`, so no server is needed.
@@ -1048,7 +1048,7 @@ The live-Neo4j tests pass against a real Neo4j 5.26.0 (verified on Arch Linux wi
 | API (FastAPI) and web app (Next.js) | Done; replaces the earlier Streamlit app feature for feature; API covered by `test_api.py`, web components by Vitest |
 | Docker Compose | Done; verified (MySQL 8.0 + Neo4j 5.26) and exercised by CI |
 | Substitute assignment | Done; tested against MySQL 8.0 and MariaDB |
-| Automated test suite | Done: 164 Python tests (163 pass with MySQL 8.0 + Neo4j 5.26, 150 need only MySQL; also green on MariaDB) and 27 web tests |
+| Automated test suite | Done: 166 Python tests (165 pass with MySQL 8.0 + Neo4j 5.26, 152 need only MySQL; also green on MariaDB) and 28 web tests |
 | Continuous integration | GitHub Actions: lint, web (type check, tests, build), Python tests on MySQL 8/Neo4j 5 (docker compose) and on MariaDB 11.4 |
 
 Known limitations (by design, for a mini-project):

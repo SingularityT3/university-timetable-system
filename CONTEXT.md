@@ -263,8 +263,8 @@ The pages below were ported one to one to `web/`; the description still explains
 - **Neo4j RUD:** queries `node_browser`, `node_neighbours`, `faculty_unavailability`, `set_unavailability` (MERGE), `delete_unavailability`;
   `(Faculty)-[:UNAVAILABLE_AT {reason, updated_at}]->(TimeSlot)` lives only in Neo4j, survives the ETL, wiped by `--reset`;
   `substitute_finder` skips marked candidates.
-- **Tests:** pytest 164 (MySQL only 150 passed / 14 skipped; + Neo4j 163 / 1, the skip is cypher-lint); also green on MariaDB 11.4.
-  Web: Vitest 27 tests (`npm test`), `npm run lint` = `tsc --noEmit`, `npm run build`.
+- **Tests:** pytest 166 (MySQL only 152 passed / 14 skipped; + Neo4j 165 / 1, the skip is cypher-lint); also green on MariaDB 11.4.
+  Web: Vitest 28 tests (`npm test`), `npm run lint` = `tsc --noEmit`, `npm run build`.
 - **CI:** jobs `lint` (ruff, actionlint, compose config, `bash -n`), `web` (Node 22), `test-docker-compose`, `test-mariadb` (loads sql/01-06, creates
   the role accounts like 07_role_accounts.sh, sets APP_SECRET / MYSQL_ADMIN_* / MYSQL_FACULTY_*).
 - After pulling new SQL files with Docker: `docker compose down -v && docker compose up -d --wait`, then generator + ETL.

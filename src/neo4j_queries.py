@@ -65,8 +65,18 @@ def queries() -> dict[str, str]:
 
 
 def get_driver():
-    """One shared driver per process (Neo4j drivers are thread-safe and pooled)."""
+    """
+    One shared driver per process (Neo4j drivers are thread-safe and pooled).
+    A cached driver is checked first (one quick round trip): if the server went away,
+    the caller gets ServiceUnavailable at once instead of the driver retrying a
+    query for ~30 s, and the driver is rebuilt once the server is back.
+    """
     global _driver
+    if _driver is not None:
+        try:
+            _driver.verify_connectivity()
+        except Exception:
+            close_driver()
     if _driver is None:
         drv = utils.get_neo4j_driver()
         try:

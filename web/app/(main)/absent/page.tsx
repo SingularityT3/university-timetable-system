@@ -32,6 +32,9 @@ export default function AbsentPage() {
   const [day, setDay] = useState("");
   const [last, setLast] = useSessionState<LastSubstitution | null>("tt_last_substitution", null);
   const plan = useApi<AbsencePlan>(fid === null ? null : qs("/absence", { faculty_id: fid, year, day }));
+  // keep the ETL button (and its result) on screen after it fixed the stale graph, until the selection changes
+  const selection = `${fid}|${year}|${day}`;
+  const [etlRanFor, setEtlRanFor] = useState<string | null>(null);
 
   function changed(r: LastSubstitution) {
     setLast(r);
@@ -73,11 +76,15 @@ export default function AbsentPage() {
       </div>
 
       {last && <LastChange last={last} onChange={changed} onDismiss={() => setLast(null)} />}
-      {data?.stale && (
-        <>
-          <Alert kind="warning">{data.stale}</Alert>
-          <EtlButton year={year} onDone={plan.reload} />
-        </>
+      {data?.stale && <Alert kind="warning">{data.stale}</Alert>}
+      {(data?.stale || etlRanFor === selection) && (
+        <EtlButton
+          year={year}
+          onDone={() => {
+            setEtlRanFor(selection);
+            plan.reload();
+          }}
+        />
       )}
 
       {plan.loading && <Spinner />}

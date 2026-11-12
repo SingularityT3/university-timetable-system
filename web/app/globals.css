@@ -213,6 +213,9 @@ hr {
   gap: 12px 24px;
   align-items: start;
 }
+.columns > * {
+  min-width: 0; /* let wide tables scroll inside their column instead of widening it */
+}
 .columns.three {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
@@ -221,7 +224,7 @@ hr {
 }
 @media (max-width: 480px) {
   .columns.wide {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .narrow {
