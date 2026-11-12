@@ -14,7 +14,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             <>
               <Alert kind="error">Cannot reach the API: {error}</Alert>
               <Alert kind="info">
-                Check that the FastAPI service is running (see README) and that MySQL is up, then reload this page.
+                Check that the Next.js server is running (npm start, see README) and that MySQL is up, then reload this page.
               </Alert>
             </>
           ) : (

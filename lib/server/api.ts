@@ -1,4 +1,4 @@
-/** Logic shared by several route handlers (port of the helpers in api/main.py). */
+/** Logic shared by several route handlers. */
 import { query, type Db, type Row } from "./db";
 import { academicYear } from "./env";
 import { runEtl } from "./etl";
@@ -61,7 +61,8 @@ export async function refreshGraph(year: string): Promise<string | null> {
     const result = await runEtl(year, { log: () => {}, role: "admin" });
     return result.ok ? null : "Neo4j graph does not match MySQL: " + result.problems.join("; ");
   } catch (e) { // MySQL is already updated
-    return `MySQL is updated, but refreshing Neo4j failed (${(e as Error).name}: ${(e as Error).message}).`;
+    const name = neo4jDownReason(e) ?? (e as Error).name; // e.g. ServiceUnavailable rather than Neo4jError
+    return `MySQL is updated, but refreshing Neo4j failed (${name}: ${(e as Error).message}).`;
   }
 }
 

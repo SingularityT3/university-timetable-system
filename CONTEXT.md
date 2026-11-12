@@ -291,8 +291,8 @@ The pages below were ported one to one to `web/`; the description still explains
 - **CLI:** `npm run generate -- [--year Y] [--replace] [--allow-partial] [--dry-run] [--time-limit S] [--max-nodes N]
   [--restarts N] [--seed N]`, `npm run etl -- [--year Y] [--reset]`, `npm run queries -- list|demo|check`,
   `npm run hash-password -- <pw>`, `npm run make-seed [-- <file>]`.
-- **Tests:** `npm test` = Vitest projects `ui` (28 tests, jsdom) + `server` (176 tests, real databases, files run
-  serially). Docker stack (MySQL 8.0 + Neo4j 5.26): 204 passed. MySQL or MariaDB 11.4 without Neo4j: 191 passed,
+- **Tests:** `npm test` = Vitest projects `ui` (28 tests, jsdom) + `server` (179 tests, real databases, files run
+  serially). Docker stack (MySQL 8.0 + Neo4j 5.26): 207 passed. MySQL or MariaDB 11.4 without Neo4j: 194 passed,
   13 skipped (live-Neo4j tests). Same safety rules as before (TEST_YEAR 2099-2100, rolled-back transactions,
   Neo4j test marks cleaned up).
 - **CI (Node only):** `lint` (npm ci, `npm run lint`, actionlint via its Docker image, `docker compose config`,

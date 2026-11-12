@@ -1,5 +1,5 @@
 /**
- * Password hashing, signed session tokens and AppUser lookup (port of api/auth.py).
+ * Password hashing, signed session tokens and AppUser lookup.
  *
  *   Passwords: PBKDF2-HMAC-SHA256, stored as  pbkdf2_sha256$<iterations>$<salt_b64>$<hash_b64>
  *   Sessions:  base64url(json{uid, role, fid, exp}) "." base64url(hmac_sha256), signed with

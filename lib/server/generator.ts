@@ -1,5 +1,5 @@
 /**
- * Clash-free timetable generator: reads MySQL, writes Timetable (port of src/generator.py).
+ * Clash-free timetable generator: reads MySQL, writes Timetable.
  *
  * ALGORITHM
  * 1. LOAD slots, sections, the Section_Course plan, Teaches, rooms and the course CONFLICT GRAPH
@@ -119,7 +119,7 @@ export function isSuccess(r: GenerationResult): boolean {
   return r.complete && r.error === null;
 }
 
-/** Plain-text report (same text as GenerationResult.report() in Python). */
+/** Plain-text report of a generation run (CLI output and the API's `report`). */
 export function report(r: GenerationResult): string {
   const lines = [
     `Academic year : ${r.academic_year}`,
@@ -154,7 +154,7 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Compare two key tuples element by element (numbers or strings), like Python tuple ordering. */
+/** Compare two key tuples element by element (numbers or strings), first difference wins. */
 function cmpTuple(a: (number | string)[], b: (number | string)[]): number {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
   return 0;
@@ -754,7 +754,7 @@ export async function generateTimetable(opts: GenerateOptions = {}): Promise<Gen
     else if (!res.complete && !allowPartial) {
       res.note = "incomplete timetable not saved (use allow_partial to keep a partial one)";
     } else if (existing && !replace) {
-      res.note = `${existing} rows already exist for ${year}; pass replace=True / --replace to overwrite`;
+      res.note = `${existing} rows already exist for ${year}; tick Replace / pass --replace to overwrite`;
     } else {
       try {
         await saveTimetable(conn, year, res.rows);

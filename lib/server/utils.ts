@@ -1,6 +1,6 @@
 /**
- * Helpers shared by the generator, ETL, queries, API routes and tests (port of src/utils.py
- * without the Neo4j settings/driver, which live in lib/server/neo4j.ts).
+ * Helpers shared by the generator, ETL, queries, API routes and tests (the Neo4j settings and
+ * driver live in lib/server/neo4j.ts).
  *
  *   describeMysqlError        turn MySQL errors into plain English
  *   toMinutes / fmtTime       TIME strings

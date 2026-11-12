@@ -996,17 +996,18 @@ afterwards. The Neo4j tests only read, except the unavailability tests, which cr
 | `auth.test.ts` | PBKDF2 hash and verify, a salt per hash, malformed hashes never verify, the seeded demo users have the documented passwords; session tokens round-trip, and tampered or expired tokens are rejected |
 | `roles.test.ts` | Each role account runs with its SQL role and has **no** privileges before `SET ROLE`; the faculty role can read the timetable but every `INSERT` / `UPDATE` / `DELETE` and any read of `AppUser` is denied (1142); the admin role can write but has no DDL |
 | `api.test.ts` | Every route handler: login sets an httpOnly cookie, wrong password 401, a malformed body 422, every route needs a login, expired session 401, logout, unknown paths a JSON 404; faculty gets **403** on every admin route; the shapes of meta, timetable, free blocks, clashes, proposed-class check, stats; generator dry run changes nothing; substitute assign + undo; graph browser, absence and ripple; unavailability create/update/delete; Neo4j down gives 503 |
-| `validation.test.ts` | Request validation coerces and rejects query and body values like the original FastAPI/pydantic API (whole numbers, booleans, ranges), with the same 422 error types |
+| `validation.test.ts` | Request validation coerces and rejects query and body values (whole numbers, booleans, ranges) and reports problems as 422 errors with a `detail` list |
+| `refresh-graph.test.ts` | After a substitution the graph refresh reports a plain-English problem when Neo4j is down or out of sync, without undoing the MySQL change |
 | `db.test.ts`, `utils.test.ts` | Connection pools, `SET ROLE`, value conversions, transactions commit/roll back, stored-procedure calls, a missing `MYSQL_USER` is reported; times, lunch-aware slot links, the weekly grid, error wording, table formatting |
 | `seed.test.ts` | `sql/03_seed_data.sql` is byte-identical to what `scripts/make-seed.ts` generates |
 | `project-files.test.ts` | Required files exist and no Python is left; every setting the code reads is in `.env.example`; `.env`, `node_modules/` and `.next/` are git-ignored; `package.json` has the documented scripts; every SQL file is loaded by Docker and by CI; the README's options, `npm run` scripts, links and file names are real |
 
-**Expected result on the bundled data** (204 tests in 24 files: 28 `ui` + 176 `server`):
+**Expected result on the bundled data** (207 tests in 25 files: 28 `ui` + 179 `server`):
 
 | Situation | Summary lines |
 |---|---|
-| MySQL only (no Neo4j) | `Test Files 23 passed \| 1 skipped (24)` · `Tests 191 passed \| 13 skipped (204)` |
-| + Neo4j running with the graph loaded (`npm run etl`) | `Test Files 24 passed (24)` · `Tests 204 passed (204)` |
+| MySQL only (no Neo4j) | `Test Files 24 passed \| 1 skipped (25)` · `Tests 194 passed \| 13 skipped (207)` |
+| + Neo4j running with the graph loaded (`npm run etl`) | `Test Files 25 passed (25)` · `Tests 207 passed (207)` |
 
 The 13 skips are the live-Neo4j tests (10 in `neo4j-live.test.ts`, 3 in `api.test.ts`); the run prints why
 ("Neo4j not reachable ..." or "The Neo4j graph is empty. Run `npm run etl` first."). Skipped is not failed, but it also means
@@ -1044,7 +1045,7 @@ tests fail. (That was done on the earlier Python suite; the TypeScript tests por
 | TypeScript port | Done: the former Python backend (FastAPI, scheduler, ETL, CLI tools, pytest suite) was ported to TypeScript with the same API contract, messages and behaviour; no Python remains |
 | Docker Compose | Done; verified (MySQL 8.0 + Neo4j 5.26) and exercised by CI |
 | Substitute assignment | Done; tested against MySQL 8.0 and MariaDB |
-| Automated test suite | Done: 204 Vitest tests (all pass with MySQL 8.0 + Neo4j 5.26; 191 pass and 13 skip with MySQL or MariaDB 11.4 alone) |
+| Automated test suite | Done: 207 Vitest tests (all pass with MySQL 8.0 + Neo4j 5.26; 194 pass and 13 skip with MySQL or MariaDB 11.4 alone) |
 | Continuous integration | GitHub Actions, Node only: lint (type check, actionlint, compose, shell), tests + build on MySQL 8/Neo4j 5 (docker compose), tests on MariaDB 11.4 |
 
 Known limitations (by design, for a mini-project):

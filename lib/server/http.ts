@@ -1,6 +1,6 @@
 /**
  * Shared helpers of the route handlers (app/api/**): JSON responses, login/role checks,
- * FastAPI-style request validation and the error mapping of the old api/main.py:
+ * request validation and the mapping of errors to status codes:
  *
  *   HttpError                 its own status            {detail: string}
  *   validation (Fields)       422                       {detail: [{type, loc, msg, input}]}
@@ -96,8 +96,8 @@ export function route<P = Record<string, never>>(
 type Num = { default?: number; ge?: number; le?: number };
 
 /**
- * Reads and validates fields like FastAPI/pydantic (lax mode): problems are collected and
- * check() throws one 422 listing them all. A field with a problem reads as a placeholder
+ * Reads and validates fields with lenient coercion (numeric strings, booleans): problems are
+ * collected and check() throws one 422 listing them all. A field with a problem reads as a placeholder
  * value, so always call check() before using the values.
  */
 export class Fields {
@@ -145,7 +145,10 @@ export class Fields {
   }
 
   private toInt(name: string, v: unknown, opts: Num): number {
-    if (typeof v === "string" && /^\s*[+-]?\d+\s*$/.test(v)) return this.range(name, Number(v), v, opts);
+    // " 7 ", "+7", "1_000" and "7.0" are integers, and so are true/false
+    const m = typeof v === "string" ? /^\s*([+-]?\d+(?:_\d+)*)(?:\.0+)?\s*$/.exec(v) : null;
+    if (m) return this.range(name, Number(m[1].replaceAll("_", "")), v, opts);
+    if (typeof v === "boolean") return this.range(name, Number(v), v, opts);
     if (typeof v === "number" && Number.isInteger(v)) return this.range(name, v, v, opts);
     if (typeof v === "number") this.issue(name, "int_from_float", "Input should be a valid integer, got a number with a fractional part", v);
     else if (typeof v === "string") this.issue(name, "int_parsing", "Input should be a valid integer, unable to parse string as an integer", v);
@@ -169,7 +172,7 @@ export class Fields {
   float(name: string, opts: Num & { default: number }): number {
     const v = this.raw(name, false, false);
     if (v === undefined) return opts.default;
-    const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    const n = typeof v === "number" || typeof v === "boolean" ? Number(v) : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
     if (Number.isFinite(n)) return this.range(name, n, v, opts);
     if (typeof v === "string") this.issue(name, "float_parsing", "Input should be a valid number, unable to parse string as a number", v);
     else this.issue(name, "float_type", "Input should be a valid number", v);

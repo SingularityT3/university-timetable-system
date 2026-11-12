@@ -1,6 +1,5 @@
 /**
- * Neo4j access: settings, one shared driver, and the documented Cypher queries
- * (port of src/neo4j_queries.py and the Neo4j parts of src/utils.py).
+ * Neo4j access: settings, one shared driver, and the documented Cypher queries.
  *
  * The Cypher text lives ONLY in cypher/queries.cypher; loadQueries() parses its
  * "// @query <name>" markers, so the functions below run exactly the documented statements.
@@ -16,7 +15,7 @@
  *
  * Everything returns plain objects (integers as numbers, temporal values as ISO text).
  * The driver only reports server notifications in result summaries (it does not log them),
- * so the Python notice filter has no counterpart here.
+ * so no notice filtering is needed.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,7 +34,7 @@ export class NotFoundError extends Error {}
 /** Neo4j is not configured (missing password). */
 export class Neo4jConfigError extends Error {}
 
-/** Python-style list text for messages: ['MON', 'TUE']. */
+/** List text for messages: ['MON', 'TUE']. */
 export const pyList = (xs: readonly string[]) => `[${xs.map((x) => `'${x}'`).join(", ")}]`;
 
 // --------------------------------------------------------------- settings
@@ -189,7 +188,7 @@ export function toCypher(value: unknown): unknown {
   return value;
 }
 
-/** Neo4j values -> JSON-friendly values (temporal types as ISO text, UTC as "+00:00" like the Python API). */
+/** Neo4j values -> JSON-friendly values (temporal types as ISO text, UTC as "+00:00"). */
 export function toPlain(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(toPlain);
   if (neo4j.isDateTime(value)) return value.toString().replace(/Z$/, "+00:00");
@@ -244,7 +243,7 @@ function day(d: string | null | undefined): string | null {
   return v;
 }
 const year = (y?: string | null) => y || academicYear();
-/** Python's int(): whole numbers only (raises InputError otherwise). */
+/** A whole number (raises InputError otherwise). */
 function int(v: unknown, what: string): number {
   const n = typeof v === "number" ? v : /^\s*[+-]?\d+\s*$/.test(String(v)) ? Number(v) : NaN;
   if (!Number.isInteger(n)) throw new InputError(`${what} must be an integer, got '${v}'`);

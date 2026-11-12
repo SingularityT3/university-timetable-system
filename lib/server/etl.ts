@@ -1,5 +1,5 @@
 /**
- * Export MySQL (system of record) into Neo4j (graph analytics); port of src/neo4j_etl.py.
+ * Export MySQL (system of record) into Neo4j (graph analytics).
  *
  * IDEMPOTENT: every node and relationship is written with MERGE on its key. Order of work:
  *   1. constraints + indexes   (cypher/constraints.cypher, created FIRST)
