@@ -45,13 +45,14 @@ def scalar(conn, sql, params=()):
 def test_schema_objects_exist(conn):
     q = lambda sql: scalar(conn, sql)
     assert q("SELECT COUNT(*) v FROM information_schema.tables WHERE table_schema = DATABASE() "
-             "AND table_type = 'BASE TABLE'") == 11
+             "AND table_type = 'BASE TABLE'") == 12                 # 11 timetable tables + AppUser
     assert q("SELECT COUNT(*) v FROM information_schema.views WHERE table_schema = DATABASE()") == 4
     assert q("SELECT COUNT(*) v FROM information_schema.triggers WHERE trigger_schema = DATABASE()") == 4
     names = {r["n"] for r in db.query(conn, "SELECT routine_name n FROM information_schema.routines "
                                             "WHERE routine_schema = DATABASE()")}
     assert {"sp_validate_placement", "sp_faculty_workload", "sp_room_utilization",
-            "sp_list_clashes", "sp_hours_coverage"} <= names
+            "sp_list_clashes", "sp_hours_coverage", "fn_faculty_load", "sp_department_summary",
+            "sp_free_blocks"} <= names
 
 
 def test_seed_data_sizes(conn):
@@ -59,6 +60,16 @@ def test_seed_data_sizes(conn):
             "Classroom": 25, "TimeSlot": 48, "Teaches": 62, "Section_Course": 50, "Enrollment": 600}
     got = {t: scalar(conn, f"SELECT COUNT(*) v FROM {t}") for t in want}
     assert got == want
+
+
+def test_app_user_faculty_login_must_link_to_a_faculty_row(conn):
+    """chk_appuser_faculty_link: a faculty login without faculty_id is rejected (rolled back either way)."""
+    cur = conn.cursor()
+    with pytest.raises(mysql.connector.Error) as exc:
+        cur.execute("INSERT INTO AppUser (username, password_hash, role) VALUES ('t_nolink', 'x', 'faculty')")
+    assert exc.value.errno in (3819, 4025)
+    cur.execute("INSERT INTO AppUser (username, password_hash, role) VALUES ('t_admin', 'x', 'admin')")
+    cur.close()
 
 
 def test_check_constraint_rejects_non_positive_credits(conn):

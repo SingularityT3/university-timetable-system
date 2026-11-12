@@ -211,22 +211,32 @@ _notification_filter_installed = False
 
 def _silence_null_elimination_notice() -> None:
     """
-    Neo4j sends warning 01G11 "null value eliminated in set function" whenever
-    count()/collect() skip NULLs coming from an OPTIONAL MATCH. Several queries
-    do that ON PURPOSE (e.g. substitute_finder), so this one notice is dropped.
-    Every other server notification is still shown.
+    Drop two kinds of Neo4j notices that the queries trigger ON PURPOSE:
+      * 01G11 "null value eliminated in set function": count()/collect() skip NULLs
+        coming from an OPTIONAL MATCH (e.g. substitute_finder).
+      * 01N51 / 01N52 "relationship type / property key does not exist" for the
+        unavailability marks (UNAVAILABLE_AT with its reason and updated_at): they only
+        exist once the first mark is saved, but the queries must work before that.
+    Every other server notification (e.g. a misspelt label or property) is still shown.
     """
     global _notification_filter_installed
     if _notification_filter_installed:
         return
     import logging
 
-    class _Drop01G11(logging.Filter):
+    class _DropExpectedNotices(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
-            return "01G11" not in record.getMessage()
+            msg = record.getMessage()
+            if "01G11" in msg:
+                return False
+            return not (("01N51" in msg or "01N52" in msg) and _MARK_NAMES.search(msg))
 
-    logging.getLogger("neo4j.notifications").addFilter(_Drop01G11())
+    logging.getLogger("neo4j.notifications").addFilter(_DropExpectedNotices())
     _notification_filter_installed = True
+
+
+# names that do not exist in the graph until the first unavailability mark is saved
+_MARK_NAMES = re.compile(r"`(UNAVAILABLE_AT|reason|updated_at)`")
 
 
 def _import_neo4j():

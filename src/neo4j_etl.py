@@ -19,6 +19,8 @@ running the ETL twice produces the same graph. Order of work:
 Run:   python src/neo4j_etl.py                 # all academic years in Timetable
        python src/neo4j_etl.py --year 2026-2027
        python src/neo4j_etl.py --reset         # wipe the graph first
+The faculty unavailability marks (UNAVAILABLE_AT, created in the web app's Graph page)
+exist only in Neo4j: a normal run keeps them, --reset deletes them too.
 Env:   MYSQL_* (see db.py) and NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD / NEO4J_DATABASE
 """
 from __future__ import annotations
@@ -332,13 +334,14 @@ def compare_counts(expected: dict, actual: dict) -> list[str]:
     return problems
 
 
-def run_etl(academic_year: str | None = None, reset: bool = False, log=print) -> dict:
+def run_etl(academic_year: str | None = None, reset: bool = False, log=print, role: str | None = None) -> dict:
     """
     Full ETL. `academic_year=None` syncs every year present in Timetable.
+    `role` picks the MySQL account (db.connect); the web API passes the user's role.
     Returns {"expected": ..., "actual": ..., "problems": [...], "ok": bool}.
     """
     t0 = time.monotonic()
-    with db.connection() as conn:
+    with db.connection(role=role) as conn:
         years = ([academic_year] if academic_year else
                  [r["academic_year"] for r in db.query(
                      conn, "SELECT DISTINCT academic_year FROM Timetable ORDER BY academic_year")])

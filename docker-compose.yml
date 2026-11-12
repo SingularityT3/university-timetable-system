@@ -21,6 +21,11 @@ services:
       # read by docker/mysql/00_app_user.sh (not by the image itself)
       APP_DB_USER: ${MYSQL_USER:-timetable}
       APP_DB_PASSWORD: ${MYSQL_PASSWORD:-change_me_timetable}
+      # read by docker/mysql/07_role_accounts.sh: the API's role accounts (tt_admin / tt_faculty)
+      MYSQL_ADMIN_USER: ${MYSQL_ADMIN_USER:-tt_admin_app}
+      MYSQL_ADMIN_PASSWORD: ${MYSQL_ADMIN_PASSWORD:-change_me_admin_app}
+      MYSQL_FACULTY_USER: ${MYSQL_FACULTY_USER:-tt_faculty_app}
+      MYSQL_FACULTY_PASSWORD: ${MYSQL_FACULTY_PASSWORD:-change_me_faculty_app}
     ports:
       - "${MYSQL_HOST_PORT:-3307}:3306"
     volumes:
@@ -32,6 +37,9 @@ services:
       - ./sql/02_migration_improvements.sql:/docker-entrypoint-initdb.d/02_migration_improvements.sql:ro
       - ./sql/03_seed_data.sql:/docker-entrypoint-initdb.d/03_seed_data.sql:ro
       - ./sql/04_views_procedures.sql:/docker-entrypoint-initdb.d/04_views_procedures.sql:ro
+      - ./sql/05_advanced_sql.sql:/docker-entrypoint-initdb.d/05_advanced_sql.sql:ro
+      - ./sql/06_auth_roles.sql:/docker-entrypoint-initdb.d/06_auth_roles.sql:ro
+      - ./docker/mysql/07_role_accounts.sh:/docker-entrypoint-initdb.d/07_role_accounts.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s

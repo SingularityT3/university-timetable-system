@@ -3,7 +3,8 @@
 > **How to use:** start a new chat, attach this file (plus the `sql/` files if you
 > have them), and say: *"Read CONTEXT.md. The project is complete; ask me what to improve (see 5f 'Possible next work')."*
 > You can also copy it to `CLAUDE.md` if you use Claude Code in this folder.
-> Last updated after **Step 6 complete** (all six steps done) plus the CI / cleanup pass (see 5g).
+> Last updated after the **Next.js + FastAPI port** (branch `nextjs-port`, see 5i): the Streamlit UI was
+> replaced by a Next.js web app + FastAPI backend, with logins, SQL roles, advanced SQL and Neo4j RUD added.
 
 ---
 
@@ -23,9 +24,10 @@ A runnable DBMS mini-project around a "University Timetable Generation System":
 **MySQL = system of record**, **Neo4j = graph analytics**. It must auto-generate a
 clash-free timetable and let the user query and visualise it.
 
-**Tech stack (do not substitute):** MySQL 8.x, Neo4j 5.x (Cypher), Python 3.11+ with
-`mysql-connector-python`, `neo4j` (official driver), `pandas`, `streamlit`; `docker-compose`
-for MySQL and Neo4j. No other databases.
+**Tech stack:** MySQL 8.x (+ MariaDB compatible), Neo4j 5.x (Cypher), Python 3.11+ with
+`mysql-connector-python`, `neo4j` (official driver), `fastapi`, `uvicorn`; web app in Next.js 15 / React 19 /
+TypeScript (Node 22, Vitest); `docker-compose` for MySQL and Neo4j. No other databases.
+(Steps 1-6 originally shipped a Streamlit + pandas UI; it was **removed** in the port, see 5i.)
 
 ## 3. Target project layout
 ```
@@ -35,10 +37,13 @@ project/
   .env.example
   CONTEXT.md
   sql/    01_schema.sql  02_migration_improvements.sql  03_seed_data.sql  04_views_procedures.sql
+          05_advanced_sql.sql  06_auth_roles.sql
   src/    db.py  generator.py  neo4j_etl.py  neo4j_queries.py  utils.py
   cypher/ constraints.cypher  queries.cypher
-  app/    streamlit_app.py
-  tests/  (no clashes, constraints enforced, ETL counts match MySQL)
+  api/    auth.py  main.py        <- FastAPI backend (uvicorn api.main:app --port 8000)
+  web/    Next.js app (app/, components/, lib/, tests/; npm run dev on port 3000)
+  docker/mysql/ 00_app_user.sh  07_role_accounts.sh
+  tests/  pytest suite (schema, generator, ETL, Neo4j, auth, roles, API, advanced SQL)
   tools/  make_seed.py            <- extra helper, optional (generates 03_seed_data.sql)
   README.md
 ```
@@ -52,12 +57,15 @@ project/
 | 2 | Seed data (`03_seed_data.sql`) | **Done, tested** |
 | 3 | Timetable generator (`src/generator.py`, `db.py`, `utils.py`) | **Done, tested on MySQL 8.0** |
 | 4 | Neo4j layer (ETL, constraints, 12 Cypher queries, Python wrappers) | **Done, verified on the user's live Neo4j 5.26.0** (see 5c) |
-| 5 | Streamlit app (`app/streamlit_app.py`) | **Done**, tested headlessly (see 5d); not yet seen in the user's browser |
+| 5 | Streamlit app | Done, later **replaced** by the Next.js app (step 7) |
 | 6 | Tooling: docker-compose, requirements, .env.example, tests, README, final checklist | **Done** (see 5e, 5f, 5g). Docker compose verified; CI on GitHub Actions |
+| 7 | Port to Next.js + FastAPI; auth + SQL roles; advanced SQL; Neo4j RUD | **Done** (see 5i) |
 
 Files delivered so far: `sql/01_schema.sql`, `sql/02_migration_improvements.sql`,
 `sql/03_seed_data.sql`, `sql/04_views_procedures.sql`, `tools/make_seed.py`, `src/db.py`, `src/utils.py`, `src/generator.py`, `cypher/constraints.cypher`, `cypher/queries.cypher`,
-`src/neo4j_etl.py`, `src/neo4j_queries.py`, `.gitignore`, `app/streamlit_app.py`, `README.md`, `requirements.txt`, `.env.example`, `docker-compose.yml`, `docker/mysql/00_app_user.sh`, `tools/probe_pandas.sh`.
+`src/neo4j_etl.py`, `src/neo4j_queries.py`, `.gitignore`, `README.md`, `requirements.txt`, `.env.example`, `docker-compose.yml`, `docker/mysql/00_app_user.sh`;
+since step 7 also `sql/05_advanced_sql.sql`, `sql/06_auth_roles.sql`, `docker/mysql/07_role_accounts.sh`, `api/`, `web/`.
+(Deleted in step 7: `app/streamlit_app.py`, `tests/test_ui.py`, `tools/probe_pandas.sh`.)
 
 ## 5. User environment (important)
 - Linux; the local `mysql` command is actually **MariaDB's** client (prints "Deprecated program name").
@@ -109,11 +117,9 @@ Files delivered so far: `sql/01_schema.sql`, `sql/02_migration_improvements.sql`
   (e.g. 3307) to avoid a clash; keep SQL/Python compatible with both MariaDB and MySQL 8.
 - Docker/Neo4j availability is **unconfirmed**; if no Docker, give a non-Docker Neo4j install route.
 - The user's parent folder path contains a space (`Uni timetable`), so quote paths in commands.
-- **VS Code is the Flatpak build (`com.visualstudio.code`); its integrated terminal runs inside a Flatpak sandbox** (Freedesktop runtime, no `pacman`, glibc 2.42).
-  In that sandbox `import pandas` with pyarrow installed **segfaults** (pandas alone is fine; verified with pandas 3.1.0 / 3.0.2 / 2.3.3 and pyarrow 26 / 21),
-  so **Streamlit and anything importing pandas must be run from a normal host terminal** (outside VS Code). The generator, ETL and Neo4j queries do not
-  use pandas and work in either terminal. Diagnostic script: `bash tools/probe_pandas.sh` (`--env-only` for a quick check).
-  Step 6 consequence: keep the core tests pandas-free; gate UI/AppTest tests behind an opt-in (`RUN_UI_TESTS=1`) because a segfault cannot be caught by pytest.
+- **VS Code is the Flatpak build**; inside its terminal `import pandas` + pyarrow segfaulted. Since step 7 nothing in the project uses pandas or
+  Streamlit (the opt-in UI tests and the probe script are gone). `utils._import_neo4j()` still keeps the Neo4j driver from importing pandas/pyarrow
+  if they happen to be installed (regression test in `test_utils.py`). Node 22 is needed for `web/`.
 
 ## 5c. Step 4 deliverables: Neo4j layer
 **Status: VERIFIED on the user's live Neo4j 5.26.0 (Java 21, tarball install, no Docker).** The ETL ran clean (15 constraint/index statements,
@@ -157,9 +163,8 @@ first start (reset: `bin/neo4j stop`, `rm -rf data/databases data/transactions`,
   (Browser http://localhost:7474, Bolt 7687). The partial-upgrade glibc problem must be fixed (`pacman -Syu`) before Java will run.
   Step 6 must therefore make Docker OPTIONAL (README: Docker path + tarball path).
 
-## 5d. Step 5 deliverables: Streamlit app
-Run from the project root: `streamlit run app/streamlit_app.py` (needs `streamlit` + `pandas` in the venv: `~/.local/bin/uv pip install streamlit pandas`;
-tested with Streamlit 1.66.1 / pandas 3.0.2). Reads MySQL via `db.py`; Neo4j is optional per page. Sidebar: academic year, page, MySQL/Neo4j status.
+## 5d. Step 5 deliverables: Streamlit app (HISTORICAL: removed in step 7, the web UI moved to Next.js, see 5i)
+The pages below were ported one to one to `web/`; the description still explains what each page does.
 - **Timetable**: weekly grid per Section / Faculty / Room (HTML table from `utils.build_week_grid` + `utils.grid_to_html`; theory blue, lab orange,
   lunch row, all text HTML-escaped), metrics, CSV download. Uses view `v_section_timetable` (has faculty_id, room_id, section_id) for all three views.
 - **Run generator**: calls `generator.generate_timetable` with replace / allow-partial / dry-run / time limit / seed; shows verdict, soft-constraint
@@ -178,13 +183,13 @@ tested with Streamlit 1.66.1 / pandas 3.0.2). Reads MySQL via `db.py`; Neo4j is 
   Neo4j pages with a stand-in server (absent plan, stale warning, ripple, insights) and with Neo4j down. **Not verified:** visual appearance in a real browser.
 - Step 6 should ship `requirements.txt` with streamlit + pandas, and tests can reuse `AppTest`, `build_week_grid`, `check_proposed_class`.
 
-## 5e. Step 6 progress: documentation and configuration files
+## 5e. Step 6 progress: documentation and configuration files (historical; current state in 5i)
 - **`README.md`** (complete project guide): features, architecture, structure, quick start, per-OS setup (Ubuntu/Debian, Fedora, Arch, macOS, Windows/WSL; Docker and native paths),
   Neo4j install (tarball/zip + Java 17/21), usage of every CLI, web-app tour, ER-to-schema explanation, migration table M1-M6, scheduler algorithm, graph model + the 12 queries,
   why MySQL + Neo4j, seed data facts, configuration table, 12-point verification checklist, troubleshooting (MySQL, Neo4j, Python/Streamlit incl. Flatpak segfault), limitations, team workflow.
   Mechanically checked: every named file exists, every CLI flag exists, internal links resolve, all `.env.example` variables documented, quoted numbers match the live database.
   Platform honesty in README: verified on Linux (Ubuntu/MySQL 8.0 sandbox; user's Arch + MariaDB + Neo4j 5.26.0); macOS / Windows / Docker instructions follow official docs but are UNTESTED.
-- **`requirements.txt`**: `mysql-connector-python>=8.4`, `neo4j>=5.20,<7`, `pandas>=2.2`, `streamlit>=1.40` (tested: 26.7.0 / 6.4.1 / 3.0.2 and 3.1.0 / 1.66.1; Python 3.12).
+- **`requirements.txt`** (now): `mysql-connector-python>=8.4`, `neo4j>=5.20,<7`, `fastapi>=0.115`, `uvicorn[standard]>=0.30` (pandas/streamlit dropped in step 7); `requirements-dev.txt` adds pytest, ruff, httpx.
 - **`.env.example`**: all MYSQL_*, NEO4J_*, ACADEMIC_YEAR (+ commented Docker vars). The loader is `utils.load_env` (real env vars win over the file).
 - **`docker-compose.yml`** (MySQL 8.0 + Neo4j 5.26-community): MySQL published on host port **3307**; init scripts mounted in `/docker-entrypoint-initdb.d` run once in order
   (`docker/mysql/00_app_user.sh` creates the app user from `MYSQL_USER`/`MYSQL_PASSWORD`, then `sql/01`..`04`). `MYSQL_DATABASE` is deliberately NOT set because `01_schema.sql` runs `CREATE DATABASE`.
@@ -243,6 +248,27 @@ tested with Streamlit 1.66.1 / pandas 3.0.2). Reads MySQL via `db.py`; Neo4j is 
 - **Tests:** `tests/test_substitutes.py` (6 tests, TEST_YEAR only, Teaches restored), ETL prune test, 1451 wording, opt-in UI test that the controls render.
   Counts: MySQL only 90/17 skipped; + Neo4j 97/10; + `RUN_UI_TESTS=1` 106/1. MariaDB + Python 3.11 (no Neo4j, UI on): 98/9.
 
+## 5i. Step 7: Next.js + FastAPI port (done; test counts in 5f-5h are historical)
+- **Architecture:** browser -> Next.js (`web/`, port 3000; `next.config.ts` rewrites `/api/*` to `API_URL`, default http://127.0.0.1:8000)
+  -> FastAPI (`api/main.py`, reuses `src/`) -> MySQL (on the user's role account) and Neo4j. Run: `uvicorn api.main:app --port 8000`,
+  `cd web && npm ci && npm run dev`. Every Streamlit page was ported; new: free blocks, department summary, Graph (Neo4j) page.
+- **Auth:** `AppUser` (sql/06; PBKDF2-SHA256 hashes, `python -m api.auth hash <pw>`), HMAC-signed httpOnly cookie `tt_session` (8 h, `APP_SECRET`
+  required). Demo logins: admin/admin123, faculty1/faculty123 (faculty 1), faculty2/faculty123 (faculty 11). API: 401 without session, 403 for
+  faculty on admin routes (generator, ETL, substitutions, unavailability writes).
+- **SQL roles:** `tt_admin` (SELECT/INSERT/UPDATE/DELETE/EXECUTE on the schema), `tt_faculty` (SELECT table by table except AppUser, EXECUTE).
+  Login accounts `MYSQL_ADMIN_USER` / `MYSQL_FACULTY_USER` (created by `docker/mysql/07_role_accounts.sh`, only the role granted);
+  `db.connect(role=...)` runs `SET ROLE` after connecting (no `SET DEFAULT ROLE`: syntax differs on MariaDB). `MYSQL_USER` stays the service
+  account (CLI, ETL, tests, login lookup). AppUser.faculty_id FK is RESTRICT (MySQL rejects SET NULL on a column used in a CHECK, error 3823).
+- **Advanced SQL (sql/05):** `fn_faculty_load` (function), `sp_department_summary` (CTEs + ROW_NUMBER), `sp_free_blocks` (WITH RECURSIVE, lunch-aware).
+- **Neo4j RUD:** queries `node_browser`, `node_neighbours`, `faculty_unavailability`, `set_unavailability` (MERGE), `delete_unavailability`;
+  `(Faculty)-[:UNAVAILABLE_AT {reason, updated_at}]->(TimeSlot)` lives only in Neo4j, survives the ETL, wiped by `--reset`;
+  `substitute_finder` skips marked candidates.
+- **Tests:** pytest 166 (MySQL only 152 passed / 14 skipped; + Neo4j 165 / 1, the skip is cypher-lint); also green on MariaDB 11.4.
+  Web: Vitest 28 tests (`npm test`), `npm run lint` = `tsc --noEmit`, `npm run build`.
+- **CI:** jobs `lint` (ruff, actionlint, compose config, `bash -n`), `web` (Node 22), `test-docker-compose`, `test-mariadb` (loads sql/01-06, creates
+  the role accounts like 07_role_accounts.sh, sets APP_SECRET / MYSQL_ADMIN_* / MYSQL_FACULTY_*).
+- After pulling new SQL files with Docker: `docker compose down -v && docker compose up -d --wait`, then generator + ETL.
+
 ## 6. Schema (from the PDF, source of truth)
 Tables and columns (names must not change):
 - `Department(dept_id PK, dept_name UNIQUE, building)`
@@ -257,6 +283,8 @@ Tables and columns (names must not change):
 - `Timetable(timetable_id PK, course_id, faculty_id, room_id, slot_id, section_id, academic_year VARCHAR(9))`
   with **hard constraints** `UNIQUE(room_id,slot_id,academic_year)`, `UNIQUE(faculty_id,slot_id,academic_year)`,
   `UNIQUE(section_id,slot_id,academic_year)`.
+- Added by sql/06 (not in the PDF): `AppUser(user_id PK, username UNIQUE, password_hash, role ENUM('admin','faculty'), faculty_id FK NULL,
+  is_active, created_at, last_login, CHECK(role='admin' OR faculty_id IS NOT NULL))`.
 
 Relationships: Department 1:N Faculty / Course / Section; Section 1:N Student; Faculty M:N Course;
 Student M:N Course; Timetable is the n-ary "Scheduled_In" relationship.
@@ -341,3 +369,5 @@ generator, launch UI), the ER-to-schema explanation, and a short "why MySQL + Ne
 - The user is on Linux with MariaDB locally. Step 6's README should show both the Docker path (preferred) and a
   local-MariaDB path (`sudo mariadb < file.sql`), and mention the `DELIMITER` caveat.
 - When loading SQL from Python (tests/setup), shell out to the `mysql`/`mariadb` client or split on `DELIMITER` yourself.
+- On the user's local MariaDB, step 7 needs `sql/05` + `sql/06` loaded and the two role accounts created (README step B3b), plus
+  `APP_SECRET` and `MYSQL_ADMIN_*` / `MYSQL_FACULTY_*` in `.env`; and Node 22 for `web/`. Not yet done on the user's machine.

@@ -1,4 +1,4 @@
-# Continuous integration: lint, then the full test suite against
+# Continuous integration: lint, the web app (Next.js), then the full Python test suite against
 #   (1) the docker-compose stack (MySQL 8.0 + Neo4j 5.26), exactly as the README's Docker path, and
 #   (2) MariaDB 11.4 (the other supported database), without Neo4j (those tests skip themselves).
 name: CI
@@ -32,7 +32,29 @@ jobs:
       - name: docker-compose.yml is valid
         run: docker compose config --quiet
       - name: Shell scripts parse
-        run: bash -n docker/mysql/00_app_user.sh tools/probe_pandas.sh
+        run: bash -n docker/mysql/00_app_user.sh docker/mysql/07_role_accounts.sh
+
+  web:
+    name: web app (Next.js, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run lint
+      - name: Unit tests (Vitest)
+        run: npm test
+      - name: Production build
+        run: npm run build
 
   test-docker-compose:
     name: tests (MySQL 8.0 + Neo4j 5, docker compose, Python 3.12)
@@ -58,10 +80,8 @@ jobs:
         run: python src/neo4j_etl.py
       - name: Run every documented Cypher query
         run: python src/neo4j_queries.py demo
-      - name: Tests (including the opt-in UI tests)
+      - name: Tests
         run: python -m pytest
-        env:
-          RUN_UI_TESTS: "1"
       - name: Container logs
         if: failure()
         run: docker compose logs --no-color
@@ -86,18 +106,33 @@ jobs:
       MYSQL_USER: timetable
       MYSQL_PASSWORD: ci_password
       MYSQL_DATABASE: university_timetable
+      # role accounts for the API (sql/06_auth_roles.sql + docker/mysql/07_role_accounts.sh)
+      MYSQL_ADMIN_USER: tt_admin_app
+      MYSQL_ADMIN_PASSWORD: ci_admin_password
+      MYSQL_FACULTY_USER: tt_faculty_app
+      MYSQL_FACULTY_PASSWORD: ci_faculty_password
+      APP_SECRET: ci-only-session-signing-secret
     steps:
       - uses: actions/checkout@v5
       - name: Load the SQL files with the server's own client (they use DELIMITER)
         run: |
           db="${{ job.services.mariadb.id }}"
-          for f in sql/01_schema.sql sql/02_migration_improvements.sql sql/03_seed_data.sql sql/04_views_procedures.sql; do
+          for f in sql/01_schema.sql sql/02_migration_improvements.sql sql/03_seed_data.sql \
+                   sql/04_views_procedures.sql sql/05_advanced_sql.sql sql/06_auth_roles.sql; do
             echo "loading $f"
             docker exec -i "$db" mariadb -uroot -proot < "$f"
           done
-          docker exec -i "$db" mariadb -uroot -proot -e \
-            "CREATE USER '$MYSQL_USER'@'%' IDENTIFIED BY '$MYSQL_PASSWORD';
-             GRANT ALL PRIVILEGES ON university_timetable.* TO '$MYSQL_USER'@'%';"
+      - name: Create the service account and the two role accounts (as docker/mysql/07_role_accounts.sh)
+        run: |
+          docker exec -i "${{ job.services.mariadb.id }}" mariadb -uroot -proot <<SQL
+          CREATE USER '$MYSQL_USER'@'%' IDENTIFIED BY '$MYSQL_PASSWORD';
+          GRANT ALL PRIVILEGES ON university_timetable.* TO '$MYSQL_USER'@'%';
+          CREATE USER '$MYSQL_ADMIN_USER'@'%' IDENTIFIED BY '$MYSQL_ADMIN_PASSWORD';
+          CREATE USER '$MYSQL_FACULTY_USER'@'%' IDENTIFIED BY '$MYSQL_FACULTY_PASSWORD';
+          GRANT tt_admin TO '$MYSQL_ADMIN_USER'@'%';
+          GRANT tt_faculty TO '$MYSQL_FACULTY_USER'@'%';
+          FLUSH PRIVILEGES;
+          SQL
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -108,5 +143,3 @@ jobs:
         run: python src/generator.py --replace
       - name: "Tests (Neo4j tests skip: no Neo4j in this job)"
         run: python -m pytest
-        env:
-          RUN_UI_TESTS: "1"

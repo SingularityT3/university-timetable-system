@@ -10,11 +10,12 @@ below run exactly the documented statements.
     Q3  most_conflicted_courses    Q9  cross_department_teaching
     Q4  free_rooms                 Q10 course_conflict_neighbours
     Q5  heaviest_day_students      Q11/12 node_counts / relationship_counts
-    Q6  faculty_shortest_path
+    Q6  faculty_shortest_path      Q13/14 browse_nodes / node_neighbours
+    Q15-17 list_unavailability / set_unavailability / delete_unavailability (graph CRUD)
     + faculty_absence_plan(): Q1 + Q2 combined for the UI's "faculty absent" tool
 
 All functions return plain Python lists/dicts (no Neo4j objects) so they
-drop straight into pandas / Streamlit.
+drop straight into JSON responses.
 
 CLI:   python src/neo4j_queries.py check    # test Neo4j connection and show which settings are used
        python src/neo4j_queries.py list     # query names
@@ -64,8 +65,18 @@ def queries() -> dict[str, str]:
 
 
 def get_driver():
-    """One shared driver per process (Neo4j drivers are thread-safe and pooled)."""
+    """
+    One shared driver per process (Neo4j drivers are thread-safe and pooled).
+    A cached driver is checked first (one quick round trip): if the server went away,
+    the caller gets ServiceUnavailable at once instead of the driver retrying a
+    query for ~30 s, and the driver is rebuilt once the server is back.
+    """
     global _driver
+    if _driver is not None:
+        try:
+            _driver.verify_connectivity()
+        except Exception:
+            close_driver()
     if _driver is None:
         drv = utils.get_neo4j_driver()
         try:
@@ -102,6 +113,16 @@ def run_query(name: str, params: dict | None = None, session=None) -> list[dict]
         return session.execute_read(work)
     with get_driver().session(database=utils.neo4j_settings()["database"]) as s:
         return s.execute_read(work)
+
+
+def run_write(name: str, params: dict | None = None) -> list[dict]:
+    """Run a named WRITE query from queries.cypher (write transaction) and return its rows."""
+    qs = queries()
+    if name not in qs:
+        raise KeyError(f"unknown query '{name}'. Available: {', '.join(qs)}")
+    cypher, params = qs[name], dict(params or {})
+    with get_driver().session(database=utils.neo4j_settings()["database"]) as s:
+        return s.execute_write(lambda tx: tx.run(cypher, params).data())
 
 
 def _day(day: str | None) -> str | None:
@@ -266,6 +287,56 @@ def node_counts(session=None) -> dict[str, int]:
 def relationship_counts(session=None) -> dict[str, int]:
     """Q12: {relationship type: count}."""
     return {r["rel_type"]: r["relationships"] for r in run_query("relationship_counts", session=session)}
+
+
+# ------------------------------------------------- Q13 - Q17 graph browser / CRUD
+LABEL_KEYS = {"Department": "dept_id", "Faculty": "faculty_id", "Course": "course_id",
+              "Section": "section_id", "Student": "student_id", "Classroom": "room_id",
+              "TimeSlot": "slot_id"}
+STRING_KEYS = {"Course", "Student"}               # every other key is an INT
+MAX_REASON = 200
+
+
+def _label(label: str) -> str:
+    if label not in LABEL_KEYS:
+        raise ValueError(f"label must be one of {sorted(LABEL_KEYS)}, got {label!r}")
+    return label
+
+
+def browse_nodes(label: str, search: str | None = None, limit: int = 50) -> list[dict]:
+    """Q13: nodes of `label` (key/name contains `search`, case-insensitive) with their degree."""
+    search = (search or "").strip()[:100] or None
+    return run_query("node_browser", {"label": _label(label), "search": search,
+                                      "limit": max(1, min(int(limit), 500))})
+
+
+def node_neighbours(label: str, key, limit: int = 200) -> list[dict]:
+    """Q14: relationships of one node (type, OUT/IN, other end's label, key and name)."""
+    key = str(key) if _label(label) in STRING_KEYS else int(key)
+    return run_query("node_neighbours", {"label": label, "key": key, "limit": max(1, min(int(limit), 500))})
+
+
+def list_unavailability(faculty_id: int | None = None) -> list[dict]:
+    """Q15: UNAVAILABLE_AT marks of one faculty member (or of everyone)."""
+    return run_query("faculty_unavailability",
+                     {"faculty_id": None if faculty_id is None else int(faculty_id)})
+
+
+def set_unavailability(faculty_id: int, slot_id: int, reason: str = "") -> dict:
+    """Q16: create or update the mark (faculty unavailable in that slot) and return it."""
+    reason = (reason or "").strip()
+    if len(reason) > MAX_REASON:
+        raise ValueError(f"reason must be at most {MAX_REASON} characters")
+    rows = run_write("set_unavailability", {"faculty_id": int(faculty_id), "slot_id": int(slot_id),
+                                            "reason": reason})
+    if not rows:
+        raise LookupError(f"no faculty {faculty_id} or no time slot {slot_id} in the graph")
+    return rows[0]
+
+
+def delete_unavailability(faculty_id: int, slot_id: int) -> int:
+    """Q17: remove the mark; returns how many were deleted (0 or 1)."""
+    return run_write("delete_unavailability", {"faculty_id": int(faculty_id), "slot_id": int(slot_id)})[0]["deleted"]
 
 
 # --------------------------------------------------------------- CLI demo
