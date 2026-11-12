@@ -70,10 +70,13 @@ nosetests.xml
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# ---- Node.js / Next.js (web/ also has its own .gitignore) -----------------
+# ---- Node.js / Next.js ------------------------------------------------------
 node_modules/
 .next/
 *.tsbuildinfo
+next-env.d.ts
+out/
+coverage/
 npm-debug.log*
 
 # ---- Docker volumes and local database data -------------------------------

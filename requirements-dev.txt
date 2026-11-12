@@ -1,5 +1,0 @@
-# Development / test dependencies:  pip install -r requirements-dev.txt
--r requirements.txt
-pytest>=8.0
-ruff>=0.6
-httpx>=0.27            # FastAPI TestClient (tests/test_api.py)

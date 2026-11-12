@@ -3,8 +3,10 @@
 > **How to use:** start a new chat, attach this file (plus the `sql/` files if you
 > have them), and say: *"Read CONTEXT.md. The project is complete; ask me what to improve (see 5f 'Possible next work')."*
 > You can also copy it to `CLAUDE.md` if you use Claude Code in this folder.
-> Last updated after the **Next.js + FastAPI port** (branch `nextjs-port`, see 5i): the Streamlit UI was
-> replaced by a Next.js web app + FastAPI backend, with logins, SQL roles, advanced SQL and Neo4j RUD added.
+> Last updated after the **TypeScript port** (branch `nextjs-port`, see 5j): the whole project is now ONE Next.js
+> application in TypeScript (pages + API route handlers + `npm run` scripts + Vitest tests). The FastAPI backend,
+> the Python scheduler/ETL/CLI tools and the pytest suite were ported and **deleted**; no Python remains.
+> Sections 5b-5i describe the earlier Python modules; their TypeScript counterparts are listed in 5j.
 
 ---
 
@@ -24,29 +26,29 @@ A runnable DBMS mini-project around a "University Timetable Generation System":
 **MySQL = system of record**, **Neo4j = graph analytics**. It must auto-generate a
 clash-free timetable and let the user query and visualise it.
 
-**Tech stack:** MySQL 8.x (+ MariaDB compatible), Neo4j 5.x (Cypher), Python 3.11+ with
-`mysql-connector-python`, `neo4j` (official driver), `fastapi`, `uvicorn`; web app in Next.js 15 / React 19 /
-TypeScript (Node 22, Vitest); `docker-compose` for MySQL and Neo4j. No other databases.
-(Steps 1-6 originally shipped a Streamlit + pandas UI; it was **removed** in the port, see 5i.)
+**Tech stack:** MySQL 8.x (+ MariaDB compatible), Neo4j 5.x (Cypher), Node.js 22 with Next.js 15 / React 19 /
+TypeScript (strict), `mysql2`, `neo4j-driver` (official), `tsx` for the CLI scripts, Vitest + Testing Library;
+`docker-compose` for MySQL and Neo4j. No other databases, no Python.
+(Steps 1-6 shipped a Python backend and a Streamlit UI; Streamlit was replaced in step 7 (5i), the Python backend
+in step 8 (5j).)
 
-## 3. Target project layout
+## 3. Project layout (current)
 ```
 project/
-  docker-compose.yml
-  requirements.txt
-  .env.example
-  CONTEXT.md
+  package.json  package-lock.json  tsconfig.json  next.config.ts  middleware.ts  vitest.config.mts
+  docker-compose.yml  .env.example  README.md  CONTEXT.md  .github/workflows/ci.yml
+  app/    (main)/ pages, login/, api/**/route.ts (the JSON API, one route handler per endpoint)
+  components/  WeekGrid, DataTable, BarChart, Sidebar ...
+  lib/    api.ts types.ts csv.ts (browser) + server/ env db utils generator etl neo4j auth http api (.ts)
+  scripts/ generate.ts etl.ts queries.ts hash-password.ts make-seed.ts   <- npm run <name> (tsx)
   sql/    01_schema.sql  02_migration_improvements.sql  03_seed_data.sql  04_views_procedures.sql
           05_advanced_sql.sql  06_auth_roles.sql
-  src/    db.py  generator.py  neo4j_etl.py  neo4j_queries.py  utils.py
   cypher/ constraints.cypher  queries.cypher
-  api/    auth.py  main.py        <- FastAPI backend (uvicorn api.main:app --port 8000)
-  web/    Next.js app (app/, components/, lib/, tests/; npm run dev on port 3000)
   docker/mysql/ 00_app_user.sh  07_role_accounts.sh
-  tests/  pytest suite (schema, generator, ETL, Neo4j, auth, roles, API, advanced SQL)
-  tools/  make_seed.py            <- extra helper, optional (generates 03_seed_data.sql)
-  README.md
+  tests/  ui/ (jsdom, mocked fetch)  server/ (real MySQL/Neo4j: schema, generator, API, roles, ETL, Neo4j, files)
+  docs/er-diagram-chen.png
 ```
+Run: `docker compose up -d --wait`, `npm ci`, `npm run generate -- --replace`, `npm run etl`, `npm run dev` (port 3000).
 
 ## 4. Progress
 
@@ -60,12 +62,15 @@ project/
 | 5 | Streamlit app | Done, later **replaced** by the Next.js app (step 7) |
 | 6 | Tooling: docker-compose, requirements, .env.example, tests, README, final checklist | **Done** (see 5e, 5f, 5g). Docker compose verified; CI on GitHub Actions |
 | 7 | Port to Next.js + FastAPI; auth + SQL roles; advanced SQL; Neo4j RUD | **Done** (see 5i) |
+| 8 | Port the backend (API, scheduler, ETL, CLI tools, tests) from Python to TypeScript inside Next.js; Python removed | **Done** (see 5j) |
 
 Files delivered so far: `sql/01_schema.sql`, `sql/02_migration_improvements.sql`,
 `sql/03_seed_data.sql`, `sql/04_views_procedures.sql`, `tools/make_seed.py`, `src/db.py`, `src/utils.py`, `src/generator.py`, `cypher/constraints.cypher`, `cypher/queries.cypher`,
 `src/neo4j_etl.py`, `src/neo4j_queries.py`, `.gitignore`, `README.md`, `requirements.txt`, `.env.example`, `docker-compose.yml`, `docker/mysql/00_app_user.sh`;
 since step 7 also `sql/05_advanced_sql.sql`, `sql/06_auth_roles.sql`, `docker/mysql/07_role_accounts.sh`, `api/`, `web/`.
 (Deleted in step 7: `app/streamlit_app.py`, `tests/test_ui.py`, `tools/probe_pandas.sh`.)
+Step 8 moved `web/` to the repository root and replaced `src/`, `api/`, `tools/make_seed.py`, `tests/*.py`,
+`requirements*.txt`, `ruff.toml` and `pytest.ini` with `lib/server/`, `app/api/`, `scripts/` and `tests/server/` (see 5j).
 
 ## 5. User environment (important)
 - Linux; the local `mysql` command is actually **MariaDB's** client (prints "Deprecated program name").
@@ -75,8 +80,8 @@ since step 7 also `sql/05_advanced_sql.sql`, `sql/06_auth_roles.sql`, `docker/my
 - Steps 1-3 were developed/tested on MySQL 8.0 AND **confirmed working on the user's MariaDB**: all SQL files load, the seed loads
   (20/120/600 counts), and the generator placed 154/154 periods and saved 154 rows; `sp_list_clashes` and `sp_hours_coverage` return nothing.
   Stay compatible with both where cheap.
-- Load files with the **CLI client**, not the Python connector: `02` and `04` use `DELIMITER`.
-- Python uses the non-root DB user **`timetable`@`localhost`** (ALL on `university_timetable.*`), **already created** on the user's MariaDB.
+- Load files with the **CLI client**, not a database driver: `02` and `04` use `DELIMITER`.
+- The app uses the non-root DB user **`timetable`@`localhost`** (ALL on `university_timetable.*`), **already created** on the user's MariaDB.
   Credentials go in `.env` (variables like `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`,
   `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `ACADEMIC_YEAR`). **Never store the password in this file.**
 - Step 6 will give Docker (real MySQL 8 + Neo4j 5). Docker availability on the user's machine is unconfirmed.
@@ -108,7 +113,7 @@ since step 7 also `sql/05_advanced_sql.sql`, `sql/06_auth_roles.sql`, `docker/my
 - DB constraint reminder: the composite FK `fk_tt_teaches` blocks deleting a `Teaches` row that a saved timetable uses; clear
   `Timetable` first (or re-run `03_seed_data.sql`, which truncates everything).
 
-### Local setup: shawshank's machine only (teammate uses plain MySQL 8.0.16+, so `mysql -u root -p < file.sql` and none of this applies to him)
+### Local setup: shawshank's machine only (Python notes are historical since step 8: only Node 22 is needed now) (teammate uses plain MySQL 8.0.16+, so `mysql -u root -p < file.sql` and none of this applies to him)
 - User switches between **fish** and plain **`sh`** (VS Code terminal), so shell syntax for env vars is unreliable. **Put settings in the project-root `.env`**
   (read by `utils.load_env()` in every shell); avoid `export` / `set -x` in instructions. `uv` is at `~/.local/bin/uv` and may not be on PATH in `sh`.
 - Python runs from a **`uv` venv (Python 3.12) at `.venv`**; the system Python is broken, so install packages with `uv pip install`.
@@ -269,6 +274,32 @@ The pages below were ported one to one to `web/`; the description still explains
   the role accounts like 07_role_accounts.sh, sets APP_SECRET / MYSQL_ADMIN_* / MYSQL_FACULTY_*).
 - After pulling new SQL files with Docker: `docker compose down -v && docker compose up -d --wait`, then generator + ETL.
 
+## 5j. Step 8: TypeScript port, Python removed (done)
+- **Why:** the user asked for everything in TypeScript. One Next.js app now serves the pages and the API; `npm ci` +
+  `npm run dev` is the whole runtime. The API contract (paths under `/api`, params, JSON shapes, status codes,
+  `{detail}` errors incl. the FastAPI-style 422 list, cookie `tt_session`) is unchanged, so the pages did not change.
+- **Module map (Python -> TypeScript):** `src/db.py` -> `lib/server/db.ts` (mysql2 pools per account; role pools run
+  `SET ROLE` on connect; TIME as "HH:MM:SS", DECIMAL as number); `src/utils.py` -> `lib/server/utils.ts` (+ env in
+  `lib/server/env.ts`, Neo4j settings in `neo4j.ts`); `src/generator.py` -> `lib/server/generator.ts` +
+  `scripts/generate.ts` (same algorithm, report text, flags and exit codes; seeded PRNG mulberry32, so timetables
+  differ from Python's but are deterministic per seed); `src/neo4j_queries.py` -> `lib/server/neo4j.ts` +
+  `scripts/queries.ts`; `src/neo4j_etl.py` -> `lib/server/etl.ts` + `scripts/etl.ts`; `api/auth.py` ->
+  `lib/server/auth.ts` (same PBKDF2 hash and token format, seeded hashes still verify) + `scripts/hash-password.ts`;
+  `api/main.py` -> `app/api/**/route.ts` + `lib/server/http.ts` / `api.ts`; `tools/make_seed.py` ->
+  `scripts/make-seed.ts` (byte-identical output: MT19937 seeded like CPython's `random`); pytest suite ->
+  `tests/server/*.test.ts` (same checks, incl. the independent timetable re-validation and project-file checks).
+- **CLI:** `npm run generate -- [--year Y] [--replace] [--allow-partial] [--dry-run] [--time-limit S] [--max-nodes N]
+  [--restarts N] [--seed N]`, `npm run etl -- [--year Y] [--reset]`, `npm run queries -- list|demo|check`,
+  `npm run hash-password -- <pw>`, `npm run make-seed [-- <file>]`.
+- **Tests:** `npm test` = Vitest projects `ui` (28 tests, jsdom) + `server` (179 tests, real databases, files run
+  serially). Docker stack (MySQL 8.0 + Neo4j 5.26): 207 passed. MySQL or MariaDB 11.4 without Neo4j: 194 passed,
+  13 skipped (live-Neo4j tests). Same safety rules as before (TEST_YEAR 2099-2100, rolled-back transactions,
+  Neo4j test marks cleaned up).
+- **CI (Node only):** `lint` (npm ci, `npm run lint`, actionlint via its Docker image, `docker compose config`,
+  `bash -n`), `test-docker-compose` (compose stack, generate, etl, `queries -- demo`, `npm test`, `npm run build`),
+  `test-mariadb` (loads sql/01-06, creates the service + role accounts, generate, `npm test`).
+- `.env`: `API_URL` dropped; every other variable unchanged.
+
 ## 6. Schema (from the PDF, source of truth)
 Tables and columns (names must not change):
 - `Department(dept_id PK, dept_name UNIQUE, building)`
@@ -329,7 +360,7 @@ Student M:N Course; Timetable is the n-ary "Scheduled_In" relationship.
 ## 10. Decisions made so far
 - Academic year default: **`2026-2027`** (odd-semester term, current date Oct 2026); make it configurable (`ACADEMIC_YEAR`).
 - Lab "consecutive periods" must **not straddle lunch** (P4 -> P5). P2->P3 and P6->P7 are acceptable.
-- Triggers/validation live in the DB; the generator must still pre-check constraints in Python and catch errors 1062, 1452, 5001-5003.
+- Triggers/validation live in the DB; the generator must still pre-check constraints in application code and catch errors 1062, 1452, 5001-5003.
 
 ## 11. Remaining steps: full requirements
 
@@ -368,6 +399,7 @@ generator, launch UI), the ER-to-schema explanation, and a short "why MySQL + Ne
 ## 12. Notes for the next session
 - The user is on Linux with MariaDB locally. Step 6's README should show both the Docker path (preferred) and a
   local-MariaDB path (`sudo mariadb < file.sql`), and mention the `DELIMITER` caveat.
-- When loading SQL from Python (tests/setup), shell out to the `mysql`/`mariadb` client or split on `DELIMITER` yourself.
+- When loading SQL from code (tests/setup), shell out to the `mysql`/`mariadb` client or split on `DELIMITER` yourself.
 - On the user's local MariaDB, step 7 needs `sql/05` + `sql/06` loaded and the two role accounts created (README step B3b), plus
-  `APP_SECRET` and `MYSQL_ADMIN_*` / `MYSQL_FACULTY_*` in `.env`; and Node 22 for `web/`. Not yet done on the user's machine.
+  `APP_SECRET` and `MYSQL_ADMIN_*` / `MYSQL_FACULTY_*` in `.env`; and Node 22 (`npm ci`). Not yet done on the user's machine.
+  `API_URL` is no longer used (no separate API server since step 8); it can be deleted from an old `.env`.

@@ -3,8 +3,9 @@
 A DBMS mini-project that **automatically generates a clash-free university timetable** and lets you
 query and visualise it. **MySQL** is the system of record (schema, constraints, triggers, views,
 stored procedures); **Neo4j** is a graph layer for relationship-heavy analytics (who can substitute
-for an absent teacher, which courses collide, what happens if a class moves); a **Next.js** web app
-talks to a **FastAPI** backend that ties it together, with logins and two roles enforced inside MySQL.
+for an absent teacher, which courses collide, what happens if a class moves); a single **Next.js**
+application written in **TypeScript** (pages + API route handlers + command-line scripts) ties it
+together, with logins and two roles enforced inside MySQL.
 
 - [Features](#features) · [Architecture](#architecture) · [Project structure](#project-structure)
 - [Quick start](#quick-start) · [Detailed setup](#detailed-setup) · [Running the system](#running-the-system)
@@ -21,46 +22,47 @@ talks to a **FastAPI** backend that ties it together, with logins and two roles 
 |---|---|
 | **Relational core (MySQL)** | 11 tables from the supplied ER diagram + `AppUser`, `UNIQUE` keys that make double-booking impossible, composite foreign keys (a teacher can only be timetabled for a course they teach, a section only for courses in its plan), triggers for room capacity and room type, 4 views, 7 stored procedures and a stored function |
 | **Advanced SQL** | `fn_faculty_load` (stored function), `sp_department_summary` (several CTEs + a window function), `sp_free_blocks` (recursive CTE): see [Advanced SQL](#advanced-sql-function-cte-recursive-cte) |
-| **Scheduler (Python)** | Greedy "most constrained first" ordering + backtracking + randomised restarts. Hard constraints always hold; soft ones (spread across days, no long teaching runs, labs in consecutive periods) are best effort. Reports exactly what could not be placed and why. All-or-nothing saves in one transaction |
+| **Scheduler (TypeScript)** | Greedy "most constrained first" ordering + backtracking + randomised restarts. Hard constraints always hold; soft ones (spread across days, no long teaching runs, labs in consecutive periods) are best effort. Reports exactly what could not be placed and why. All-or-nothing saves in one transaction |
 | **Graph analytics (Neo4j)** | Idempotent MySQL → Neo4j export; derived `CONFLICTS_WITH` between courses; 12 documented analytic Cypher queries (impact of an absence, substitute finder, free rooms, shortest path between teachers, ripple effect of moving a class ...) plus read / update / delete queries for the Graph page (node browser, faculty unavailability marks) |
-| **Web app (Next.js + FastAPI)** | Login, weekly grids per section / faculty / room with free blocks, generator control panel, "faculty absent" tool (with one-click substitute assignment and undo), clash checker (incl. "would this class be allowed?" what-if), statistics with a department summary, Neo4j graph browser and unavailability editor, CSV downloads |
+| **Web app (Next.js)** | Login, weekly grids per section / faculty / room with free blocks, generator control panel, "faculty absent" tool (with one-click substitute assignment and undo), clash checker (incl. "would this class be allowed?" what-if), statistics with a department summary, Neo4j graph browser and unavailability editor, CSV downloads |
 | **Authentication and roles** | `AppUser` table with PBKDF2 password hashes, signed httpOnly session cookie, roles **admin** and **faculty**. Each request runs on a MySQL account that holds only the matching SQL role (`tt_admin` / `tt_faculty`), so the database itself refuses a faculty write |
 | **Seed data** | 3 departments, 20 faculty, 30 courses (24 theory + 6 lab), 10 sections, 120 students, 25 rooms, 48 time slots, 600 enrollments, all deliberately feasible; 3 demo logins |
 
 ## Architecture
 
 ```
-          ┌──────────────────────────────────┐
-browser ─►│ Next.js web app (web/)           │  pages: login · timetable · generator · absent
-          │ React, TypeScript, port 3000     │  clash checker · statistics · graph
-          └────────────────┬─────────────────┘
-                           │ /api/* proxied (same origin, httpOnly cookie tt_session)
-          ┌────────────────▼─────────────────┐
-          │ FastAPI backend (api/), port 8000│  login, roles, JSON routes;
-          │ reuses src/ (generator, ETL,     │  reuses the Python modules below
-          │ Neo4j queries)                   │
-          └──────┬──────────────────┬────────┘
-  SQL as tt_admin│or tt_faculty     │ Cypher (12 analytic queries + graph RUD)
-   (SET ROLE)    │                  │
-        ┌────────▼────────────────┐   ETL   ┌▼──────────────────────┐
-        │ MySQL / MariaDB         │ ──────► │ Neo4j (graph)          │
-        │ system of record        │ src/    │ analytics, paths,      │
-        │ constraints · triggers  │ neo4j_  │ conflicts, substitutes,│
-        │ roles · AppUser         │ etl.py  │ unavailability marks   │
-        └────────────▲────────────┘         └───────────────────────┘
-                     │ reads data, writes Timetable
-              ┌──────┴───────┐
-              │ generator.py │  greedy + backtracking scheduler (also runs from the web app)
-              └──────────────┘
+          ┌──────────────────────────────────────────────────┐
+browser ─►│ Next.js app (one Node.js server, port 3000)      │
+          │                                                  │
+          │  pages (React)        login · timetable · generator · absent
+          │  app/(main)/, login/  clash checker · statistics · graph
+          │        │ fetch /api/* (same origin, httpOnly cookie tt_session)
+          │        ▼                                         │
+          │  API route handlers   app/api/**/route.ts: login, roles, JSON routes
+          │        │ lib/server/: generator, ETL, Neo4j queries, auth, db
+          └────────┼───────────────────────┬─────────────────┘
+  SQL as tt_admin  │ or tt_faculty         │ Cypher (12 analytic queries + graph RUD)
+   (SET ROLE)      │                       │
+        ┌──────────▼──────────────┐  ETL   ┌▼───────────────────────┐
+        │ MySQL / MariaDB         │ ─────► │ Neo4j (graph)          │
+        │ system of record        │ lib/   │ analytics, paths,      │
+        │ constraints · triggers  │ server/│ conflicts, substitutes,│
+        │ roles · AppUser         │ etl.ts │ unavailability marks   │
+        └──────────▲──────────────┘        └────────────────────────┘
+                   │ reads data, writes Timetable
+         ┌─────────┴──────────────────────┐
+         │ npm run generate / etl /       │  the same lib/server/ code from the command line
+         │ queries (scripts/*.ts via tsx) │  (the generator also runs from the web app)
+         └────────────────────────────────┘
 ```
 
 **Rule of thumb:** MySQL always holds the truth. Neo4j is a *derived copy*: after you regenerate
 a timetable, refresh it with the ETL (the web app has a button for it). The one exception is the faculty
 unavailability marks, which live only in Neo4j (see [Neo4j RUD](#neo4j-read-update-delete-the-graph-page)).
 
-**Tech stack:** MySQL 8.x (also works on MariaDB) · Neo4j 5.x (Cypher) · Python 3.11+ with
-`mysql-connector-python`, `neo4j`, `fastapi`, `uvicorn` · Node.js 22 with Next.js 15, React 19, TypeScript
-(tests: Vitest + Testing Library) · Docker Compose (optional).
+**Tech stack:** MySQL 8.x (also works on MariaDB) · Neo4j 5.x (Cypher) · Node.js 22 with Next.js 15, React 19 and
+TypeScript, `mysql2` and the official `neo4j-driver` (one language for the pages, the API, the scheduler, the ETL
+and the CLI tools; tests: Vitest + Testing Library) · Docker Compose (optional).
 
 ## Project structure
 
@@ -68,61 +70,55 @@ unavailability marks, which live only in Neo4j (see [Neo4j RUD](#neo4j-read-upda
 university-timetable-system/
 ├── README.md                     this file
 ├── CONTEXT.md                    project handoff notes (decisions, status, environment quirks)
+├── package.json                  dependencies and npm scripts (dev, build, start, lint, test, generate, etl ...)
+├── package-lock.json             exact dependency versions (npm ci)
+├── tsconfig.json                 TypeScript settings (strict)
+├── next.config.ts                Next.js settings (mysql2 / neo4j-driver stay server-side)
+├── middleware.ts                 sends visitors without a session to /login
+├── vitest.config.mts             test projects: ui (jsdom) and server (Node, real databases)
 ├── docker-compose.yml            MySQL 8 + Neo4j 5 containers (optional)
-├── requirements.txt              Python dependencies
-├── requirements-dev.txt          + pytest, ruff and httpx, for tests and linting
-├── pytest.ini                    test configuration and markers
-├── ruff.toml                     lint settings (`ruff check .`)
-├── .github/workflows/ci.yml      GitHub Actions: lint, web app, tests on MySQL 8/Neo4j 5 and on MariaDB
+├── .github/workflows/ci.yml      GitHub Actions: lint, tests + build on MySQL 8/Neo4j 5 and on MariaDB
 ├── .env.example                  settings template -> copy to .env
 ├── .gitignore
+├── app/                          Next.js App Router
+│   ├── login/, (main)/           pages: login, timetable, generator, absent, clashes, statistics, graph
+│   └── api/**/route.ts           the JSON API: auth, meta, timetable, generator, ETL, absence, graph ...
+├── components/                   WeekGrid, DataTable, BarChart, Sidebar, Metric, Alert ...
+├── lib/
+│   ├── api.ts, types.ts, csv.ts  browser side: typed API client, response types, CSV export
+│   └── server/                   server side only (API routes, scripts, tests)
+│       ├── env.ts                settings from .env / the environment
+│       ├── db.ts                 MySQL pools (service account, role accounts + SET ROLE), transactions
+│       ├── utils.ts              error translation, slot geometry, conflict graph, grid builder
+│       ├── generator.ts          the scheduler (+ "check a proposed class", substitute assignment)
+│       ├── etl.ts                MySQL -> Neo4j export, verification
+│       ├── neo4j.ts              driver, the Cypher queries from cypher/queries.cypher, wrappers
+│       ├── auth.ts               PBKDF2 hashing, signed session tokens, AppUser lookup
+│       ├── http.ts               route helpers: login/role checks, validation, error -> HTTP status
+│       └── api.ts                logic shared by several routes
+├── scripts/                      command-line tools (run with npm run <name>)
+│   ├── generate.ts               npm run generate: build the timetable
+│   ├── etl.ts                    npm run etl: copy MySQL into Neo4j
+│   ├── queries.ts                npm run queries: list | demo | check
+│   ├── hash-password.ts          npm run hash-password: PBKDF2 hash for a new AppUser row
+│   └── make-seed.ts              npm run make-seed: regenerates sql/03_seed_data.sql (optional)
 ├── sql/
 │   ├── 01_schema.sql             original DDL from the PDF (unchanged)
 │   ├── 02_migration_improvements.sql   every improvement, flagged M1-M6
-│   ├── 03_seed_data.sql          sample data (generated by tools/make_seed.py)
+│   ├── 03_seed_data.sql          sample data (generated by scripts/make-seed.ts)
 │   ├── 04_views_procedures.sql   4 views + 4 procedures
 │   ├── 05_advanced_sql.sql       stored function, CTE procedure, recursive-CTE procedure
 │   └── 06_auth_roles.sql         AppUser table + demo logins, SQL roles tt_admin / tt_faculty
-├── src/
-│   ├── db.py                     connection helpers (env-driven credentials, role accounts + SET ROLE)
-│   ├── utils.py                  config, error translation, slot geometry, conflict graph, grid builder
-│   ├── generator.py              the scheduler (+ "check a proposed class", substitute assignment)
-│   ├── neo4j_etl.py              MySQL -> Neo4j export, verification
-│   └── neo4j_queries.py          Python access to the Cypher queries + CLI (list | demo | check)
 ├── cypher/
 │   ├── constraints.cypher        uniqueness constraints and indexes
 │   └── queries.cypher            the documented queries (single source of truth)
-├── api/                          FastAPI backend
-│   ├── auth.py                   PBKDF2 hashing, signed session tokens, AppUser lookup
-│   └── main.py                   the JSON routes (uvicorn api.main:app)
-├── web/                          Next.js web app (App Router, TypeScript)
-│   ├── app/                      pages: login/ and (main)/ timetable, generator, absent, clashes, statistics, graph
-│   ├── components/               WeekGrid, DataTable, BarChart, Sidebar, Metric, Alert ...
-│   ├── lib/                      API client, CSV export, shared types
-│   ├── tests/                    Vitest + Testing Library unit tests
-│   ├── middleware.ts             sends visitors without a session to /login
-│   ├── next.config.ts            proxies /api/* to the FastAPI server (API_URL)
-│   └── package.json              npm scripts: dev, build, start, lint, test
-├── docs/er-diagram-chen.png      the Chen ER diagram as a rendered image
 ├── docker/mysql/
 │   ├── 00_app_user.sh            creates the app (service) DB user inside the container
-│   └── 07_role_accounts.sh       creates the two role login accounts used by the API
-├── tools/
-│   └── make_seed.py              regenerates sql/03_seed_data.sql (optional)
-└── tests/                        automated Python test suite (see "Tests")
-    ├── conftest.py               fixtures; safety rules (tests never touch real data)
-    ├── test_schema.py            constraints, composite FKs, triggers, procedures
-    ├── test_advanced_sql.py      the stored function, the CTE and the recursive CTE
-    ├── test_generator.py         scheduler, independent re-validation, saving, failure reports
-    ├── test_substitutes.py       assigning and undoing a substitute teacher
-    ├── test_etl_offline.py       ETL logic against a recording stand-in (no Neo4j needed)
-    ├── test_neo4j_live.py        graph vs MySQL, unavailability marks, on a running Neo4j (auto-skips)
-    ├── test_auth.py              password hashing and session tokens
-    ├── test_roles.py             the SQL roles: what each role account may and may not do
-    ├── test_api.py               every API route through FastAPI's TestClient, admin vs faculty
-    ├── test_db.py                connection and transaction helpers
-    ├── test_utils.py             helpers, error wording, the Cypher query file
-    └── test_project_files.py     files, docs and settings agree with each other
+│   └── 07_role_accounts.sh       creates the two role login accounts used by the API routes
+├── docs/er-diagram-chen.png      the Chen ER diagram as a rendered image
+└── tests/                        automated test suite, Vitest (see "Tests")
+    ├── ui/                       components and pages with a mocked fetch (jsdom, no servers)
+    └── server/                   database, scheduler, API routes, roles, ETL and Neo4j, project files
 ```
 
 ---
@@ -133,22 +129,16 @@ Fastest path **with Docker** (any OS with Docker Desktop / Docker Engine) and **
 
 ```bash
 git clone https://github.com/Shashankb30/university-timetable-system.git university-timetable-system && cd university-timetable-system
-python3 -m venv .venv && source .venv/bin/activate      # Windows: see "Create the Python environment"
-pip install -r requirements.txt
-cp .env.example .env                                    # then edit: set MYSQL_PORT=3307, your passwords and APP_SECRET
-docker compose up -d --wait                             # MySQL + Neo4j (schema, seed, roles and logins load automatically)
-python src/generator.py                                 # build the timetable
-python src/neo4j_etl.py                                 # copy it into the graph
-uvicorn api.main:app --port 8000                        # the API (leave running; API docs at http://127.0.0.1:8000/docs)
+cp .env.example .env                    # then edit: set MYSQL_PORT=3307, your passwords and APP_SECRET
+docker compose up -d --wait             # MySQL + Neo4j (schema, seed, roles and logins load automatically)
+npm ci                                  # install the exact dependency versions
+npm run generate -- --replace           # build the timetable
+npm run etl                             # copy it into the graph
+npm run dev                             # open http://localhost:3000 and log in as admin / admin123
 ```
 
-In a second terminal:
-
-```bash
-cd web && npm ci && npm run dev                         # open http://localhost:3000 and log in as admin / admin123
-```
-
-No Docker? Follow [Option B: native installs](#option-b-native-installs-no-docker).
+That is the whole system: one Next.js server serves the pages **and** the JSON API (`/api/*`); there is no
+second process to start. No Docker? Follow [Option B: native installs](#option-b-native-installs-no-docker).
 
 ---
 
@@ -158,12 +148,13 @@ No Docker? Follow [Option B: native installs](#option-b-native-installs-no-docke
 
 | Component | Needed for | Version | Notes |
 |---|---|---|---|
-| Python | everything | 3.11 – 3.13 (tested on 3.12) | The very newest Python may lack wheels for some packages; `uv` can provide 3.12 |
+| Node.js + npm | everything (web app, API, scheduler, ETL, tests) | Node **22** LTS (tested on 22.23 / npm 10) | <https://nodejs.org/> or your package manager (`nvm install 22`) |
 | MySQL **or** MariaDB | the database | MySQL 8.0.16+ (older versions silently ignore `CHECK` constraints) · MariaDB recent | Not needed if you use Docker |
 | Neo4j Community | graph layer | 5.7+ (tested on **5.26.0**) | Needs **Java 17 or 21** for native installs; not needed with Docker |
-| Node.js + npm | the web app (`web/`) | Node **22** LTS (tested on 22.23 / npm 10) | <https://nodejs.org/> or your package manager (`nvm install 22`) |
 | Docker + Compose | optional shortcut | any recent | Runs MySQL and Neo4j for you |
 | Git | cloning | any | |
+
+No Python is needed: the whole project is TypeScript.
 
 **Platform support:** developed and verified on Linux (Ubuntu/MySQL 8.0 for automated checks, Arch Linux with
 MariaDB and Neo4j 5.26.0 on the author's machine). The macOS, Windows and Docker instructions follow the official
@@ -177,61 +168,30 @@ git clone https://github.com/Shashankb30/university-timetable-system.git univers
 cd university-timetable-system
 ```
 
-### 3. Create the Python environment
+### 3. Install the dependencies
 
-Use a virtual environment so the project's packages stay separate.
-
-<details><summary><b>Linux / macOS (bash, zsh)</b></summary>
+From the project root (the same command on every OS and shell):
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+node -v                            # must print v22.x
+npm ci                             # installs exactly what package-lock.json lists into node_modules/
 ```
-</details>
 
-<details><summary><b>Linux (fish shell)</b></summary>
-
-```fish
-python3 -m venv .venv
-source .venv/bin/activate.fish
-pip install -r requirements.txt
-```
-</details>
-
-<details><summary><b>Windows (PowerShell) <i>(not tested by the author)</i></b></summary>
-
-```powershell
-py -3.12 -m venv .venv
-# if activation is blocked:  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-Command Prompt (cmd): `.venv\Scripts\activate.bat`
-</details>
-
-<details><summary><b>Any OS with <code>uv</code> (handy when the system Python is too old, too new or broken)</b></summary>
-
-```bash
-# install uv: https://docs.astral.sh/uv/getting-started/installation/
-uv venv --python 3.12
-source .venv/bin/activate          # fish: activate.fish   |  Windows: .venv\Scripts\Activate.ps1
-uv pip install -r requirements.txt
-```
-</details>
+`npm ci` is needed once, and again after `package-lock.json` changes. The command-line tools run TypeScript
+directly through `tsx` (a dev dependency), so there is no separate compile step.
 
 ### 4. Configure the settings (`.env`)
 
-All credentials and options live in a `.env` file in the project root. It is read by every script and by
-the API, **in every shell** (no `export` / `set -x` needed) and is git-ignored.
+All credentials and options live in a `.env` file in the project root. It is read by the Next.js server, by
+every `npm run` script and by the tests, **in every shell** (no `export` / `set -x` needed) and is git-ignored.
 
 ```bash
 cp .env.example .env               # Windows PowerShell: Copy-Item .env.example .env
 ```
 
 Open `.env` and set your own passwords and a random `APP_SECRET`
-(`python -c "import secrets; print(secrets.token_urlsafe(32))"`). The most important lines are explained in
-[Configuration reference](#configuration-reference). Real environment variables override the file.
+(`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`). The most important lines are
+explained in [Configuration reference](#configuration-reference). Real environment variables override the file.
 
 ### 5. Databases
 
@@ -400,53 +360,85 @@ When the log shows `Started.`, Neo4j is up: Browser at <http://localhost:7474> (
 
 ## Running the system
 
-All commands run from the project root with the virtual environment active.
+All commands run from the project root. Arguments for a script go after `--` (npm's separator).
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `python src/generator.py` | Builds the timetable for `ACADEMIC_YEAR` and saves it |
-| 2 | `python src/neo4j_etl.py` | Copies MySQL data + timetable into Neo4j and verifies the counts |
-| 3 | `python src/neo4j_queries.py demo` | Runs every Cypher query and prints results |
-| 4 | `uvicorn api.main:app --port 8000` | The FastAPI backend at <http://127.0.0.1:8000> (interactive docs at `/docs`) |
-| 5 | `cd web && npm ci && npm run dev` | The web app at <http://localhost:3000> (development server) |
+| 1 | `npm run generate` | Builds the timetable for `ACADEMIC_YEAR` and saves it (add `-- --replace` to overwrite) |
+| 2 | `npm run etl` | Copies MySQL data + timetable into Neo4j and verifies the counts |
+| 3 | `npm run queries -- demo` | Runs every Cypher query and prints results |
+| 4 | `npm run dev` | The web app **and** its API at <http://localhost:3000> (development server, reloads on save) |
 
-For a production-style run of the web app: `cd web && npm run build && npm run start` (also port 3000).
-`npm ci` is only needed once (and after `package-lock.json` changes).
+For a production-style run: `npm run build && npm run start` (also port 3000; the API routes are part of the same
+server). `npm ci` is only needed once (and after `package-lock.json` changes).
 
-**Generator options**
+### Command-line reference
 
-```bash
-python src/generator.py --dry-run                 # compute and report only, write nothing
-python src/generator.py --replace                 # overwrite an existing timetable for the year
-python src/generator.py --allow-partial           # keep a clash-free partial result if a complete one is impossible
-python src/generator.py --year 2027-2028 --seed 7 --time-limit 60 --restarts 6
-```
-Exit code is `0` on success, `1` otherwise. Without `--replace` it refuses to overwrite an existing year.
-
-**Neo4j helpers**
+**`npm run generate`**: the scheduler (`scripts/generate.ts`)
 
 ```bash
-python src/neo4j_queries.py check      # which NEO4J_* settings are used (password masked) + a real login test
-python src/neo4j_queries.py list       # the available queries
-python src/neo4j_etl.py --year 2026-2027   # refresh only one year
-python src/neo4j_etl.py --reset            # wipe the graph first, then rebuild (also deletes the unavailability marks)
+npm run generate -- --dry-run                 # compute and report only, write nothing
+npm run generate -- --replace                 # overwrite an existing timetable for the year
+npm run generate -- --allow-partial           # keep a clash-free partial result if a complete one is impossible
+npm run generate -- --year 2027-2028 --seed 7 --time-limit 60 --restarts 6
+npm run generate -- --max-nodes 500000        # search budget per attempt (default 300000)
 ```
 
-**API helpers**
+| Option | Default | Meaning |
+|---|---|---|
+| `--year YEAR` | `ACADEMIC_YEAR` | Academic year to build |
+| `--replace` | off | Delete and rebuild an existing timetable for the year (otherwise it refuses) |
+| `--allow-partial` | off | Save a clash-free partial result when a complete one is not found |
+| `--dry-run` | off | Report only; nothing is written |
+| `--time-limit S` | `30` | Seconds of search in total |
+| `--max-nodes N` | `300000` | Search nodes per attempt |
+| `--restarts N` | `4` | Randomised restarts (`0` = one attempt) |
+| `--seed N` | `42` | Random seed: the same seed gives the same timetable |
+
+Exit code `0` on success, `1` when no complete timetable was saved, `2` when MySQL is unreachable or an argument is
+wrong.
+
+**`npm run etl`**: MySQL → Neo4j (`scripts/etl.ts`)
 
 ```bash
-uvicorn api.main:app --port 8000 --reload   # restart the API automatically when api/ or src/ changes
-python -m api.auth hash 'new-password'      # print a PBKDF2 hash for a new AppUser row
+npm run etl                        # every academic year in Timetable
+npm run etl -- --year 2026-2027    # refresh only one year
+npm run etl -- --reset             # wipe the graph first, then rebuild (also deletes the unavailability marks)
+```
+Exit code `0` when the graph matches MySQL, `1` on a mismatch, `2` when MySQL or Neo4j is unreachable.
+
+**`npm run queries`**: the documented Cypher queries (`scripts/queries.ts`)
+
+```bash
+npm run queries -- check      # which NEO4J_* settings are used (password masked) + a real login test
+npm run queries -- list       # the available queries
+npm run queries -- demo       # run every query with sample inputs
 ```
 
-> **Windows/Docker note:** the web app, the API and the CLI tools run on your machine and talk to the
-> databases over `localhost`; only the databases live in containers.
+**`npm run hash-password`** and **`npm run make-seed`**
+
+```bash
+npm run hash-password -- 'new-password'      # print a PBKDF2 hash for a new AppUser row
+npm run make-seed                            # rewrite sql/03_seed_data.sql (deterministic; optional)
+npm run make-seed -- /tmp/seed.sql           # ... or write it somewhere else
+```
+
+**Development**
+
+```bash
+npm run dev -- --port 3001     # another port
+npm run lint                   # TypeScript type check (tsc --noEmit)
+npm test                       # the test suite (see Tests)
+```
+
+> **Windows/Docker note:** the web app and the CLI tools run on your machine and talk to the databases over
+> `localhost`; only the databases live in containers.
 
 ---
 
 ## Using the web app
 
-Start the API and the web app (steps 4 and 5 above) and open <http://localhost:3000>. You land on the
+Start the web app (`npm run dev`, step 4 above) and open <http://localhost:3000>. You land on the
 **login page**. The seed data (`sql/06_auth_roles.sql`) has three demo accounts:
 
 | Username | Password | Role | Linked faculty member |
@@ -490,11 +482,11 @@ If Neo4j is not running, only the Neo4j-backed parts show a message; everything 
 
 Access control is enforced in three layers, from the outside in:
 
-1. **Web app** (`web/middleware.ts`): a visitor without the session cookie is sent to `/login`; admin-only
+1. **Pages** (`middleware.ts`): a visitor without the session cookie is sent to `/login`; admin-only
    links and buttons are hidden for faculty users. This is convenience only.
-2. **API** (`api/main.py`): every route except `/auth/login`, `/auth/logout` and `/health` needs a valid
-   session (otherwise **401**); generator, ETL, substitutions and unavailability writes need the admin role
-   (otherwise **403**).
+2. **API route handlers** (`app/api/**/route.ts`, checks in `lib/server/http.ts`): every route except
+   `/api/auth/login`, `/api/auth/logout` and `/api/health` needs a valid session (otherwise **401**); generator,
+   ETL, substitutions and unavailability writes need the admin role (otherwise **403**).
 3. **Database** (`sql/06_auth_roles.sql`): each request talks to MySQL on an account that holds **only** the
    SQL role of the logged-in user. Even a bug in the API cannot make a faculty request write.
 
@@ -503,17 +495,17 @@ Access control is enforced in three layers, from the outside in:
 constraint requires a faculty login to be linked to a `Faculty` row (`role = 'admin' OR faculty_id IS NOT NULL`);
 that link is how the app knows "my timetable".
 
-**Passwords.** PBKDF2-HMAC-SHA256 from Python's standard library (`hashlib.pbkdf2_hmac`), 200 000
+**Passwords.** PBKDF2-HMAC-SHA256 from Node's built-in `crypto` module (`pbkdf2Sync`), 200 000
 iterations, a random 16-byte salt per password, stored as `pbkdf2_sha256$<iterations>$<salt>$<hash>` and
-compared in constant time (`hmac.compare_digest`). `python -m api.auth hash <password>` prints a hash for a
-new row. Plain-text passwords are never stored.
+compared in constant time (`timingSafeEqual`); see `lib/server/auth.ts`. `npm run hash-password -- <password>`
+prints a hash for a new row. Plain-text passwords are never stored.
 
-**Sessions.** `POST /auth/login` sets the cookie `tt_session`: a token `base64(json{uid, role, fid, exp})`
+**Sessions.** `POST /api/auth/login` sets the cookie `tt_session`: a token `base64(json{uid, role, fid, exp})`
 followed by an HMAC-SHA256 signature made with `APP_SECRET`. The cookie is `httpOnly` (JavaScript cannot read
 it), `SameSite=Lax` and expires after 8 hours. On every request the API checks the signature and the expiry and
-re-reads the user, so a deactivated account is locked out at once. The API refuses to start without
-`APP_SECRET`. The browser only ever talks to the Next.js origin (`/api/*` is proxied to FastAPI), so the
-cookie stays first-party.
+re-reads the user, so a deactivated account is locked out at once. Without `APP_SECRET` the API refuses to
+log anyone in. Pages and API share one origin (the Next.js server), so the cookie stays first-party and no CORS
+setup is needed.
 
 **SQL roles.** `06_auth_roles.sql` creates two roles and `docker/mysql/07_role_accounts.sh` creates one login
 account per role, with no direct privileges:
@@ -522,11 +514,11 @@ account per role, with no direct privileges:
 |---|---|---|
 | `tt_admin` | `MYSQL_ADMIN_USER` (default `tt_admin_app`) | `SELECT, INSERT, UPDATE, DELETE, EXECUTE` on every table, view and routine (no DDL) |
 | `tt_faculty` | `MYSQL_FACULTY_USER` (default `tt_faculty_app`) | `SELECT` on the 11 timetable tables and the 4 views, granted table by table, **not** on `AppUser`; `EXECUTE` on the routines; no writes |
-| *(service account)* | `MYSQL_USER` (`timetable`) | everything on the schema: CLI scripts, ETL, tests and the login lookup |
+| *(service account)* | `MYSQL_USER` (`timetable`) | everything on the schema: `npm run` scripts, ETL, tests and the login lookup |
 
-`db.connect(role="admin" | "faculty")` logs in with that account and immediately runs
-`SET ROLE tt_admin` / `SET ROLE tt_faculty` (instead of `SET DEFAULT ROLE`, whose syntax differs between MySQL
-and MariaDB). The API opens every request's connection this way. What the faculty account sees:
+`pool("admin" | "faculty")` in `lib/server/db.ts` logs in with that account and runs `SET ROLE tt_admin` /
+`SET ROLE tt_faculty` on every new connection, before anything else (instead of `SET DEFAULT ROLE`, whose syntax
+differs between MySQL and MariaDB). Every API request uses the pool of the logged-in user's role. What the faculty account sees:
 
 ```text
 SELECT CURRENT_ROLE()                -> `tt_faculty`@`%`
@@ -698,7 +690,7 @@ and the gap is under 30 minutes (the same rule as the generator), so tea breaks 
 it. The **anchor** member picks free slots with no free predecessor (a block starts there); the **recursive**
 member extends a run by the next linked free slot; the final `SELECT` keeps runs whose last slot has no successor.
 
-Output on the bundled data after `python src/generator.py` (identical on MySQL 8.0 and MariaDB 11.4):
+Output on the bundled data after `npm run generate` (identical on MySQL 8.0 and MariaDB 11.4):
 
 ```text
 mysql> SELECT fn_faculty_load(1, '2026-2027') AS load_f1, fn_faculty_load(11, '2026-2027') AS load_f11;
@@ -733,7 +725,7 @@ mysql> CALL sp_free_blocks('2026-2027', 'FACULTY', 1);     -- first rows of 15
 On Monday faculty 1 teaches only period 5, so the morning (P1–P4, across the tea break) is one block and P6–P7
 another; P8 is busy. Lunch splits P4 and P5 into separate blocks on Tuesday.
 
-### The scheduler (`src/generator.py`)
+### The scheduler (`lib/server/generator.ts`)
 
 1. **Load** slots, sections, plans, teachers, rooms and the course *conflict graph* (courses sharing
    qualified faculty or enrolled students).
@@ -756,7 +748,7 @@ twice in a day, at most 3 consecutive periods per teacher, lab periods consecuti
 
 ### The graph layer (Neo4j)
 
-`src/neo4j_etl.py` copies MySQL into Neo4j with `MERGE` (safe to repeat): constraints and indexes first, then
+`lib/server/etl.ts` (`npm run etl`, or the web app's **Update Neo4j graph** button) copies MySQL into Neo4j with `MERGE` (safe to repeat): constraints and indexes first, then
 nodes, relationships, the timetable, and finally the derived `CONFLICTS_WITH`. Relationships whose MySQL row was
 deleted (for example a `Teaches` row removed by an undo) are pruned, so the graph never keeps ghosts.
 
@@ -764,7 +756,7 @@ deleted (for example a `Teaches` row removed by an undo) are pruned, so the grap
 |---|---|
 | Department, Faculty, Course, Section, Student, Classroom, TimeSlot | `WORKS_IN`, `TEACHES`, `STUDIES_IN`, `ENROLLED_IN`, `OFFERED_BY`, `SCHEDULED_IN` (Course→Section, one per timetable row, carrying room, slot, teacher, year), `CONFLICTS_WITH` (Course–Course, `shared_faculty`, `shared_students`, `shared_count`); extras `BELONGS_TO`, `TAKES`, `TEACHES_SECTION`; app-owned `UNAVAILABLE_AT` (Faculty→TimeSlot, `reason`, `updated_at`) |
 
-The queries live in `cypher/queries.cypher` (fully commented; the Python code runs exactly that file). The 12
+The queries live in `cypher/queries.cypher` (fully commented; `lib/server/neo4j.ts` parses it at run time and runs exactly those statements). The 12
 analytic ones:
 
 | Query | Answers |
@@ -792,19 +784,19 @@ conference on Friday period 3". The **Graph (Neo4j)** page of the web app works 
 
 | Operation | Web app | API route | Cypher (`cypher/queries.cypher`) |
 |---|---|---|---|
-| **Read** nodes | Node browser: pick a label, search by id or name; shows properties and degree | `GET /graph/nodes` | `node_browser` |
-| **Read** relationships | Click a node: its neighbours, relationship type and direction | `GET /graph/neighbours` | `node_neighbours` |
-| **Read** marks | Faculty unavailability list (everyone may read) | `GET /graph/unavailability` | `faculty_unavailability` |
-| **Create / Update** | Slot + reason → *Save*; *Edit reason* on a row (admin) | `PUT /graph/unavailability` | `set_unavailability` (`MERGE` + `SET u.reason, u.updated_at = datetime()`) |
-| **Delete** | *Delete* on a row (admin) | `DELETE /graph/unavailability` | `delete_unavailability` |
+| **Read** nodes | Node browser: pick a label, search by id or name; shows properties and degree | `GET /api/graph/nodes` | `node_browser` |
+| **Read** relationships | Click a node: its neighbours, relationship type and direction | `GET /api/graph/neighbours` | `node_neighbours` |
+| **Read** marks | Faculty unavailability list (everyone may read) | `GET /api/graph/unavailability` | `faculty_unavailability` |
+| **Create / Update** | Slot + reason → *Save*; *Edit reason* on a row (admin) | `PUT /api/graph/unavailability` | `set_unavailability` (`MERGE` + `SET u.reason, u.updated_at = datetime()`) |
+| **Delete** | *Delete* on a row (admin) | `DELETE /api/graph/unavailability` | `delete_unavailability` |
 
 The marks matter: `substitute_finder` skips a candidate who is marked unavailable in the slot to cover
 (`AND NOT EXISTS { (cand)-[:UNAVAILABLE_AT]->(:TimeSlot {slot_id: s.slot_id}) }`), so the **Faculty absent**
-page never suggests them. Input is validated in `src/neo4j_queries.py` (label whitelist, integer ids, reason at most
+page never suggests them. Input is validated in `lib/server/neo4j.ts` (label whitelist, integer ids, reason at most
 200 characters); unknown faculty or slot gives 404, Neo4j being down gives 503.
 
-**Lifetime:** a normal `python src/neo4j_etl.py` run keeps the marks (the ETL only prunes relationship types it
-builds from MySQL). `python src/neo4j_etl.py --reset` wipes the whole graph, **marks included**.
+**Lifetime:** a normal `npm run etl` run keeps the marks (the ETL only prunes relationship types it
+builds from MySQL). `npm run etl -- --reset` wipes the whole graph, **marks included**.
 
 ### Why MySQL **and** Neo4j?
 
@@ -815,23 +807,27 @@ builds from MySQL). `python src/neo4j_etl.py --reset` wipes the whole graph, **m
   teachers linked?", "what else breaks if I move this class?" are multi-hop traversals that need several
   self-joins in SQL but a single readable pattern in Cypher.
 - Keeping MySQL as the single source of truth and treating Neo4j as a rebuildable copy avoids
-  consistency problems: if the graph is ever stale or damaged, `python src/neo4j_etl.py --reset` rebuilds it
+  consistency problems: if the graph is ever stale or damaged, `npm run etl -- --reset` rebuilds it
   (only the unavailability marks, which exist only in Neo4j, are lost).
 
-### Why Next.js + FastAPI?
+### Why one Next.js + TypeScript application?
 
-- **FastAPI** lets the web app reuse the existing Python code unchanged (the generator, the ETL, the Neo4j
-  queries and the clash rules live in `src/`), instead of re-implementing them in another language. It validates
-  every request body with typed models (bad input becomes a clear 422) and generates interactive API docs at
-  `/docs`. It is small: two files in `api/`.
-- **Next.js** (React + TypeScript) gives a real multi-page web application with client-side navigation, typed API
-  responses (`web/lib/types.ts`), reusable components (`WeekGrid`, `DataTable`, `BarChart`) and component tests
-  with Vitest. Its `/api/*` rewrite to FastAPI keeps the browser on one origin, so the session cookie can be
-  `httpOnly` and first-party without any CORS setup.
-- **Separation of concerns:** the browser never holds database credentials; the API is the only thing that
-  talks to MySQL and Neo4j, and it does so with the user's SQL role. The same API can serve another client
-  (a mobile app, scripts) later.
-- Both are mainstream, well documented and free; no UI kit or chart library is used, the CSS is one file.
+- **One language, one process.** The pages, the JSON API, the scheduler, the ETL, the Neo4j queries and the
+  command-line tools are all TypeScript in one Next.js project. `npm ci` installs everything; `npm run dev` starts
+  everything. There is no second runtime (and no virtual environment) to install, and no second server to keep
+  running and configure (`API_URL`, ports, proxying).
+- **Shared types end to end.** The response shapes in `lib/types.ts` are used by the pages and checked by the
+  compiler (`npm run lint` = `tsc --noEmit` in strict mode) together with the route handlers and the server code,
+  so a renamed field breaks the build instead of a page.
+- **Route handlers are the API.** Each endpoint is a small file under `app/api/` that authenticates the user,
+  opens a MySQL connection on the matching role account and calls the shared code in `lib/server/`. Pages and API
+  share one origin, so the session cookie is `httpOnly` and first-party without any CORS setup; the browser never
+  holds database credentials, and the same API can serve another client (a mobile app, scripts) later.
+- **Same code from the command line.** `npm run generate`, `etl` and `queries` run the same `lib/server/` modules
+  as the web app (through `tsx`, no build step), and the Vitest suite tests the route handlers directly with real
+  `Request` objects.
+- **Mature drivers:** `mysql2` (connection pools, prepared statements) and the official `neo4j-driver`.
+- Everything is mainstream, well documented and free; no UI kit or chart library is used, the CSS is one file.
 
 ### Sample data (`sql/03_seed_data.sql`)
 
@@ -841,13 +837,14 @@ class size used for capacity checks) · 25 rooms (18 lecture, 7 lab) · 48 slots
 between periods 4 and 5) · 62 `Teaches`, 50 `Section_Course`, 600 `Enrollment` rows. Two teachers are qualified
 across departments so the graph has bridges. Every section needs 15–16 of 48 slots and every course has at least
 two qualified teachers, so a clash-free timetable always exists.
-`python tools/make_seed.py` regenerates the file deterministically.
+`npm run make-seed` (`scripts/make-seed.ts`) regenerates the file deterministically.
 
 ---
 
 ## Configuration reference
 
-Set in `.env` (see `.env.example`). Real environment variables take precedence.
+Set in `.env` (see `.env.example`); the Next.js server, the `npm run` scripts and the tests all read it.
+Real environment variables take precedence.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -861,10 +858,9 @@ Set in `.env` (see `.env.example`). Real environment variables take precedence.
 | `NEO4J_USER` | `neo4j` | Neo4j user |
 | `NEO4J_PASSWORD` | *(required)* | Must equal the password Neo4j was set up with (8+ chars) |
 | `NEO4J_DATABASE` | `neo4j` | Community Edition has only this database |
-| `MYSQL_ADMIN_USER`, `MYSQL_ADMIN_PASSWORD` | `tt_admin_app`, *(required for the API)* | Login account holding the SQL role `tt_admin` (admin requests) |
-| `MYSQL_FACULTY_USER`, `MYSQL_FACULTY_PASSWORD` | `tt_faculty_app`, *(required for the API)* | Login account holding the SQL role `tt_faculty` (faculty requests) |
-| `APP_SECRET` | *(required for the API)* | Signs the session cookie; a long random string. The API refuses to start without it; changing it logs everybody out |
-| `API_URL` | `http://127.0.0.1:8000` | Where the Next.js server forwards `/api/*`. Read by `web/next.config.ts` from the environment of `npm run dev` / `npm run build` (not from the root `.env`) |
+| `MYSQL_ADMIN_USER`, `MYSQL_ADMIN_PASSWORD` | `tt_admin_app`, *(required for the web app)* | Login account holding the SQL role `tt_admin` (admin requests) |
+| `MYSQL_FACULTY_USER`, `MYSQL_FACULTY_PASSWORD` | `tt_faculty_app`, *(required for the web app)* | Login account holding the SQL role `tt_faculty` (faculty requests) |
+| `APP_SECRET` | *(required for the web app)* | Signs the session cookie; a long random string. Without it nobody can log in; changing it logs everybody out |
 | `ACADEMIC_YEAR` | `2026-2027` | Year used by default everywhere |
 | `MYSQL_ROOT_PASSWORD`, `MYSQL_HOST_PORT` | *(Docker only)* | Container root password; published host port (default 3307) |
 
@@ -885,21 +881,21 @@ substitute your own admin command, or use the `timetable` user.)
 | 3 | Rules installed | `SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema='university_timetable';` | 4 |
 | 3b | Routines and logins | `SELECT routine_type, COUNT(*) FROM information_schema.routines WHERE routine_schema='university_timetable' GROUP BY routine_type; SELECT username, role FROM AppUser;` | 1 FUNCTION, 7 PROCEDURE · `admin`, `faculty1`, `faculty2` |
 | 3c | SQL roles | `SHOW GRANTS FOR tt_faculty;` | `SELECT` on 11 tables + 4 views (no `AppUser`), `EXECUTE`; nothing else |
-| 4 | Generator dry run | `python src/generator.py --dry-run` | `Result: COMPLETE`, `Periods placed: 154 / 154` |
-| 5 | Generator saves | `python src/generator.py` | `Saved to MySQL: yes (154 rows)` |
+| 4 | Generator dry run | `npm run generate -- --dry-run` | `Result: COMPLETE`, `Periods placed: 154 / 154` |
+| 5 | Generator saves | `npm run generate -- --replace` | `Saved to MySQL: yes (154 rows)` |
 | 6 | No clashes | `CALL sp_list_clashes('2026-2027');` | **empty result** |
 | 7 | Hours correct | `CALL sp_hours_coverage('2026-2027');` | **empty result** |
 | 7b | Advanced SQL | `CALL sp_department_summary('2026-2027'); CALL sp_free_blocks('2026-2027','FACULTY',1);` | 3 rows (77 / 46 / 31 periods) · 15 rows, first `MON 1-4` (see [Advanced SQL](#advanced-sql-function-cte-recursive-cte)) |
-| 8 | Neo4j login | `python src/neo4j_queries.py check` | `Connection: OK` |
-| 9 | ETL | `python src/neo4j_etl.py` | `Verification: OK, graph matches MySQL`; running it twice gives identical counts |
-| 10 | Graph size | `python src/neo4j_queries.py demo` (first tables) | nodes 3/20/30/10/120/25/48; `SCHEDULED_IN` 154, `CONFLICTS_WITH` 91, `TEACHES_SECTION` 80, `TEACHES` 62, `ENROLLED_IN` 600 |
-| 11 | API | `uvicorn api.main:app --port 8000`, then open <http://127.0.0.1:8000/health> | `{"mysql":true,"neo4j":true}` |
-| 12 | Web app | `cd web && npm run dev`, open <http://localhost:3000>, log in as `admin` / `admin123` | Timetable grid for "Computer Science and Engineering / Sem 3 / A" shows 15 periods; sidebar shows MySQL and Neo4j connected |
+| 8 | Neo4j login | `npm run queries -- check` | `Connection: OK` |
+| 9 | ETL | `npm run etl` | `Verification: OK, graph matches MySQL`; running it twice gives identical counts |
+| 10 | Graph size | `npm run queries -- demo` (first tables) | nodes 3/20/30/10/120/25/48; `SCHEDULED_IN` 154, `CONFLICTS_WITH` 91, `TEACHES_SECTION` 80, `TEACHES` 62, `ENROLLED_IN` 600 |
+| 11 | API | `npm run dev`, then open <http://localhost:3000/api/health> | `{"mysql":true,"neo4j":true}` |
+| 12 | Web app | with `npm run dev` running, open <http://localhost:3000>, log in as `admin` / `admin123` | Timetable grid for "Computer Science and Engineering / Sem 3 / A" shows 15 periods; sidebar shows MySQL and Neo4j connected |
 | 13 | Constraints bite | In the app: *Clash checker → Check a proposed class*, choose a THEORY course with a LAB room | "MySQL would REJECT this class" |
 | 14 | Roles bite | Log out, log in as `faculty1` / `faculty123` | Own timetable is shown; *Run generator* is not in the menu; no Assign buttons or unavailability form. `curl` to an admin route with that cookie → 403 |
 | 15 | Neo4j RUD | As admin: *Graph (Neo4j)* → mark a teacher unavailable in a slot they are free in; *Faculty absent* for a colleague teaching then | The marked teacher is no longer offered as a substitute for that slot; delete the mark and they are back |
-| 16 | Python test suite | `pytest` | see [Tests](#tests) for the expected summary line |
-| 17 | Web tests and build | `cd web && npm test && npm run build` | `28 passed`; build succeeds |
+| 16 | Test suite | `npm test` | see [Tests](#tests) for the expected summary line |
+| 17 | Type check and build | `npm run lint && npm run build` | no errors; the build lists the pages and the `/api/*` routes |
 
 ---
 
@@ -910,12 +906,12 @@ substitute your own admin command, or use the `timetable` user.)
 | Symptom | Cause and fix |
 |---|---|
 | `mysql: Deprecated program name ... use mariadb` | Your `mysql` is MariaDB's client; harmless. Use `mariadb` / `sudo mariadb` |
-| `ERROR 1698 Access denied for user 'root'@'localhost'` | Root uses socket authentication (Linux/MariaDB/Ubuntu): run the client with `sudo`, and create the `timetable` user for the Python code |
-| Python says `Access denied` for `timetable` | Wrong `MYSQL_PASSWORD` in `.env`, or the user was not created for both `'localhost'` and `'127.0.0.1'`; or set `MYSQL_UNIX_SOCKET` |
+| `ERROR 1698 Access denied for user 'root'@'localhost'` | Root uses socket authentication (Linux/MariaDB/Ubuntu): run the client with `sudo`, and create the `timetable` user for the application |
+| The app or an `npm run` script says `Access denied` for `timetable` | Wrong `MYSQL_PASSWORD` in `.env`, or the user was not created for both `'localhost'` and `'127.0.0.1'`; or set `MYSQL_UNIX_SOCKET` |
 | `Could not use MySQL: 2003 ... Connection refused` | The database server is not running, or `MYSQL_HOST` / `MYSQL_PORT` are wrong (3306 local, 3307 Docker). Start the server and retry |
 | `Could not use MySQL: 1045 Access denied` | Wrong `MYSQL_USER` / `MYSQL_PASSWORD` in `.env`, or the user was not created (step B2) |
-| `MYSQL_USER is not set` | `.env` missing or in the wrong folder. It must be in the project root, next to `src/` |
-| Errors around `DELIMITER` when loading `02` / `04` | Load with the command-line client (`-e "source ..."`), not Workbench or Python |
+| `MYSQL_USER is not set` | `.env` missing or in the wrong folder. It must be in the project root, next to `package.json`; run the `npm` commands from there |
+| Errors around `DELIMITER` when loading `02` / `04` | Load with the command-line client (`-e "source ..."`), not Workbench or a database driver |
 | `01_schema.sql` fails: database exists / `02` fails: already exists | Files are one-shot. `DROP DATABASE university_timetable;` and start again |
 | Cannot delete a `Teaches` row | Intended: the composite foreign key protects timetable rows that use it. Clear `Timetable` first or re-run `03_seed_data.sql` |
 | Port 3306 already in use with Docker | Keep the default `MYSQL_HOST_PORT=3307` and `MYSQL_PORT=3307` in `.env` |
@@ -927,114 +923,114 @@ substitute your own admin command, or use the `timetable` user.)
 | Symptom | Cause and fix |
 |---|---|
 | `ServiceUnavailable` / connection refused on 7687 | Neo4j is not running. Start it (`bin/neo4j console`, or `docker compose up -d`). The web app's sidebar shows "Neo4j: unavailable"; Neo4j routes return 503 |
-| `AuthError` / unauthorized | `NEO4J_PASSWORD` in `.env` is not the password Neo4j has. Run `python src/neo4j_queries.py check` (shows where the value comes from and whether a real environment variable overrides `.env`). A fresh Neo4j starts with user/password `neo4j`/`neo4j` and forces a change on first browser login |
+| `AuthError` / unauthorized | `NEO4J_PASSWORD` in `.env` is not the password Neo4j has. Run `npm run queries -- check` (shows where the value comes from and whether a real environment variable overrides `.env`). A fresh Neo4j starts with user/password `neo4j`/`neo4j` and forces a change on first browser login |
 | Need to reset the password (nothing stored yet) | Stop Neo4j (`bin/neo4j stop`, check with `status`), `rm -rf data/databases data/transactions`, `bin/neo4j-admin dbms set-initial-password <new>`, start again. `set-initial-password` only works **while Neo4j is stopped and before its first start** |
 | Neo4j does not start | `java -version` must report 17 or 21; check that ports 7474/7687 are free |
-| "graph is out of date" in the app | You regenerated the timetable. Click **Update Neo4j graph** or run `python src/neo4j_etl.py` |
+| "graph is out of date" in the app | You regenerated the timetable. Click **Update Neo4j graph** or run `npm run etl` |
 | ETL says `MISMATCH` | Re-run with `--reset` (this also deletes the unavailability marks); if it persists, compare the listed counts with MySQL |
 | Unavailability marks disappeared | `--reset` or `docker compose down -v` wipes them; a normal ETL run keeps them |
 </details>
 
-<details><summary><b>Python and the generator</b></summary>
+<details><summary><b>Node.js, npm and the generator</b></summary>
 
 | Symptom | Cause and fix |
 |---|---|
-| `ImportError ... GLIBC_x.y not found` from the system Python | Half-finished system upgrade (seen on Arch). Finish with a full `sudo pacman -Syu` (never `-Sy` alone) and reboot, or use a `uv`-provided Python (`uv venv --python 3.12`) |
-| `uv: command not found` | `uv` lives in `~/.local/bin`; add it to `PATH` or call `~/.local/bin/uv` |
-| Environment variables do not stick / different syntax in bash vs fish vs PowerShell | Put everything in `.env`; the code reads it in every shell |
-| `Timetable ... already has rows; pass --replace` | Intended safety. Use `--replace` to overwrite |
+| `npm ci` fails, `tsx: not found` / `next: not found` | Use Node 22 (`node -v`) and run the commands in the project root (next to `package.json`); then `npm ci` again |
+| `npm ci` complains that `package.json` and `package-lock.json` are out of sync | Somebody edited `package.json` by hand: run `npm install` once and commit the updated lock file |
+| A flag is ignored, or npm prints `Unknown cli config` | Script options go after `--`: `npm run generate -- --replace`, not `npm run generate --replace` |
+| Environment variables do not stick / different syntax in bash vs fish vs PowerShell | Put everything in `.env`; every script reads it in every shell |
+| `154 rows already exist for 2026-2027; ... --replace to overwrite` | Intended safety. Use `--replace` to overwrite |
 | Generator: `PARTIAL` / `FAILED` with reasons | Read the "Could NOT be placed" lines (e.g. every qualified teacher busy, no free room of that type). Fix the data, or add `--allow-partial` to keep a partial result |
 | Generator: "input data makes a timetable impossible" | Pre-flight found a necessary condition that fails (course with no teacher, no big enough room ...). The message names the course |
 </details>
 
-<details><summary><b>API and web app</b></summary>
+<details><summary><b>Web app and API</b></summary>
 
 | Symptom | Cause and fix |
 |---|---|
-| `uvicorn` exits with `RuntimeError: APP_SECRET is not set` | Put a long random `APP_SECRET` in `.env` (see [Configuration reference](#configuration-reference)) |
-| `uvicorn: command not found` / `No module named 'fastapi'` | The virtual environment is not active, or it predates the API: `pip install -r requirements.txt` |
+| Login answers "Internal Server Error" and the `npm run dev` terminal shows `APP_SECRET is not set` | Put a long random `APP_SECRET` in `.env` (see [Configuration reference](#configuration-reference)) and restart `npm run dev` |
 | Login works but every page says it cannot reach MySQL, or the API answers 503 / "Access denied for user 'tt_..._app'" | The role accounts do not exist or their passwords differ from `.env`. Docker: the accounts are created only on a fresh volume, so `docker compose down -v && docker compose up -d --wait` (then rerun the generator and ETL). Native: step B3b |
 | `Table 'university_timetable.AppUser' doesn't exist` / `FUNCTION fn_faculty_load does not exist` | `sql/05` and `sql/06` are not loaded: with Docker recreate the volume as above, natively run them (step B3) |
-| Web app shows "Internal Server Error" / `ECONNREFUSED 127.0.0.1:8000` in the `npm run dev` terminal | The API is not running, or runs on another port: start `uvicorn api.main:app --port 8000`, or set `API_URL` when starting the web app |
-| Always redirected back to `/login` | The session expired (8 h) or `APP_SECRET` changed: log in again. Open the app via `localhost:3000`, not via the API port |
+| Changes to `.env` have no effect | The Next.js server reads `.env` when it starts: stop `npm run dev` (Ctrl+C) and start it again |
+| Always redirected back to `/login` | The session expired (8 h) or `APP_SECRET` changed: log in again |
 | "Only an admin can do this." (403) | You are logged in as a faculty user; log in as `admin` |
-| `npm ci` fails / `next: not found` | Use Node 22 (`node -v`), run the commands inside `web/` |
-| Port 3000 or 8000 already in use | `npm run dev -- --port 3001` (web) or `uvicorn api.main:app --port 8001` and `API_URL=http://127.0.0.1:8001 npm run dev` |
+| `npm run build` fails with type errors | Run `npm run lint` to see them all; the build type-checks the whole project |
+| Port 3000 already in use | `npm run dev -- --port 3001` (or `npm run start -- --port 3001`) |
 </details>
 
 ---
 
 ## Tests
 
-Python (database, API, roles, graph):
+One test runner, [Vitest](https://vitest.dev/), with two projects (see `vitest.config.mts`):
 
 ```bash
-pip install -r requirements-dev.txt          # adds pytest, ruff and httpx
-pytest                                       # everything that can run (needs MySQL + .env)
-pytest -m neo4j                              # only the live-Neo4j checks (Neo4j running, ETL done)
-pytest tests/test_api.py tests/test_roles.py # only the API and the SQL roles
-ruff check .                                 # lint (same check as CI)
+npm test                                         # everything: ui + server (needs MySQL + .env; Neo4j optional)
+npx vitest run --project ui                      # only the page and component tests (no servers needed)
+npx vitest run --project server                  # only the database / API / graph tests
+npx vitest run tests/server/api.test.ts tests/server/roles.test.ts   # only the API and the SQL roles
+npx vitest                                       # watch mode while you work
+npm run lint                                     # TypeScript type check (same check as CI)
+npm run build                                    # production build
 ```
 
-Web app (in `web/`):
-
-```bash
-npm test                                     # Vitest + Testing Library unit tests (no servers needed)
-npm run lint                                 # TypeScript type check (tsc, emits nothing)
-npm run build                                # production build
-```
+- **`ui`** (`tests/ui/`, jsdom): React Testing Library tests that mock `fetch`, so no server is needed.
+- **`server`** (`tests/server/`, Node): run against the real MySQL from `.env` (and Neo4j when it is up). The files
+  run one after another (they share the database), and the setup loads `.env` and closes the connection pools.
+  The API tests call the route handlers in `app/api/` directly with real `Request` objects, so no web server
+  is started either.
 
 **Safety:** the tests never change your real timetable. Anything that writes uses a throw-away academic year
 (`2099-2100`, wiped before and after) or a transaction that is rolled back. Logins restore `AppUser.last_login`
 afterwards. The Neo4j tests only read, except the unavailability tests, which create their own mark and delete it.
 
-| File | What it proves |
+| File (`tests/server/`) | What it proves |
 |---|---|
-| `test_schema.py` | Object counts and seed sizes; `CHECK` constraints (including "a faculty login must link to a Faculty row"); a room, teacher or section **cannot be double-booked** (errors named by constraint); the **triggers** reject a too-small room and a wrong room type (5001/5002) and a wrong semester (5003); a teacher must be in `Teaches` and a course in the section's plan (composite FKs); a `Teaches` row in use cannot be deleted; `sp_list_clashes` catches drift the triggers cannot see |
-| `test_advanced_sql.py` | `fn_faculty_load` equals a plain count; `sp_department_summary` totals match the timetable; `sp_free_blocks` returns exactly the free periods of every teacher and room as maximal, lunch-aware runs; an empty year gives the half days; an unknown kind is rejected |
-| `test_generator.py` | A complete timetable is found; an **independent checker** (written from the raw tables, not from generator internals) confirms every hard rule and the exact weekly hours; soft constraints met on the seed data; labs consecutive and never across lunch; same seed ⇒ same result; saved timetable passes `sp_list_clashes` and `sp_hours_coverage` with zero rows; refuses to overwrite; a bad row **rolls back the whole save**; impossible input is explained, not crashed on; when the search runs out of budget the partial result is still clash-free, every unplaced class has a reason, and nothing is saved; CLI exit codes (0 / 2 when MySQL is unreachable) |
-| `test_substitutes.py` | Assigning a qualified substitute keeps the timetable clash-free and can be undone; a busy teacher is refused; an unqualified one needs the `Teaches` row, which undo removes again; an undo that cannot drop that row (now used by another class) changes nothing; bad requests are explained. Uses the throw-away year and restores `Teaches` |
-| `test_etl_offline.py` | Without Neo4j: constraints are created first, nodes before relationships, the old timetable is deleted before reload, rows sent equal the MySQL counts, every static relationship type is pruned against MySQL, the ETL never deletes unavailability marks, batches never exceed 500; `--year` verification covers every year in the graph; a friendly exit code 2 when Neo4j is unreachable |
-| `test_neo4j_live.py` | With Neo4j: every node/relationship count equals MySQL; `CONFLICTS_WITH` built in Neo4j **equals** the SQL definition; workload totals, absence plans, free rooms, shortest paths and the move-ripple agree with MySQL; node browser and neighbours; an unavailability mark can be created, updated and deleted, and the substitute finder skips a colleague marked unavailable |
-| `test_auth.py` | PBKDF2 hash and verify, a salt per hash, malformed hashes never verify, the seeded demo users have the documented passwords; session tokens round-trip, and tampered or expired tokens are rejected |
-| `test_roles.py` | Each role account runs with its SQL role and has **no** privileges before `SET ROLE`; the faculty role can read the timetable but every `INSERT` / `UPDATE` / `DELETE` and any read of `AppUser` is denied (1142); the admin role can write but has no DDL |
-| `test_api.py` | Through FastAPI's TestClient: login sets an httpOnly cookie, wrong password 401, every route needs a login, expired session 401, logout; faculty gets **403** on every admin route; the shapes of meta, timetable, free blocks, clashes, proposed-class check, stats; generator dry run changes nothing; substitute assign + undo; graph browser, absence and ripple; unavailability create/update/delete; Neo4j down gives 503 |
-| `test_utils.py` | Times, lunch-aware slot links, the weekly grid and its HTML escaping, error wording, `.env` parsing, masked password report, every documented query loads and each wrapper passes exactly the parameters its query uses, the graph write wrappers validate their input, and importing the Neo4j driver never loads pandas or pyarrow |
-| `test_db.py` | `db.transaction` commits/rolls back, `db.call_procedure` works with both forms of mysql-connector's `stored_results`, a missing `MYSQL_USER` is reported (no database needed) |
-| `test_project_files.py` | Required files exist; every setting the code reads is in `.env.example`; `.env`, `node_modules/` and `.next/` are git-ignored; the requirements match the imports; `web/package.json` has the documented scripts; every SQL file is loaded by Docker and by CI; `sql/03_seed_data.sql` is byte-identical to what `tools/make_seed.py` generates; the README's options, links and file names are real |
+| `schema.test.ts` | Object counts and seed sizes; `CHECK` constraints (including "a faculty login must link to a Faculty row"); a room, teacher or section **cannot be double-booked** (errors named by constraint), but the same slot is free in another year; the **triggers** reject a too-small room and a wrong room type (5001/5002) and a wrong semester (5003); a teacher must be in `Teaches` and a course in the section's plan (composite FKs); a `Teaches` row in use cannot be deleted; `sp_list_clashes` catches drift the triggers cannot see |
+| `advanced-sql.test.ts` | `fn_faculty_load` equals a plain count; `sp_department_summary` totals match the timetable; `sp_free_blocks` returns exactly the free periods of every teacher and room as maximal, lunch-aware runs; an empty year gives the half days; an unknown kind is rejected |
+| `generator.test.ts` | A complete timetable is found; an **independent checker** (written from the raw tables, not from generator internals) confirms every hard rule and the exact weekly hours; soft constraints met on the seed data; labs consecutive and never across lunch; same seed ⇒ same result; saved timetable passes `sp_list_clashes` and `sp_hours_coverage` with zero rows; refuses to overwrite; a bad row **rolls back the whole save**; the proposed-class check rule by rule; impossible input is explained, not crashed on; when the search runs out of budget the partial result is still clash-free, every unplaced class has a reason, and nothing is saved; CLI exit codes (0 / 2 when MySQL is unreachable) |
+| `substitutes.test.ts` | Assigning a qualified substitute keeps the timetable clash-free and can be undone; a busy teacher is refused; an unqualified one needs the `Teaches` row, which undo removes again; an undo that cannot drop that row (now used by another class) changes nothing; bad requests are explained. Uses the throw-away year and restores `Teaches` |
+| `etl-offline.test.ts` | Without Neo4j: constraints are created first, nodes before relationships, the old timetable is deleted before reload, rows sent equal the MySQL counts, every static relationship type is pruned against MySQL, the ETL never deletes unavailability marks, batches never exceed 500; `--year` verification covers every year in the graph; a friendly exit code 2 when Neo4j is unreachable |
+| `neo4j-live.test.ts` | With Neo4j: every node/relationship count equals MySQL; `CONFLICTS_WITH` built in Neo4j **equals** the SQL definition; workload totals, absence plans, free rooms, shortest paths and the move-ripple agree with MySQL; node browser and neighbours; an unavailability mark can be created, updated and deleted, and the substitute finder skips a colleague marked unavailable |
+| `neo4j-queries.test.ts` | Every documented query loads from `cypher/queries.cypher` and each wrapper passes exactly the parameters its query uses; the graph write wrappers validate their input; absence-plan and ranking logic; `.env` parsing, the masked settings report, the driver cache |
+| `auth.test.ts` | PBKDF2 hash and verify, a salt per hash, malformed hashes never verify, the seeded demo users have the documented passwords; session tokens round-trip, and tampered or expired tokens are rejected |
+| `roles.test.ts` | Each role account runs with its SQL role and has **no** privileges before `SET ROLE`; the faculty role can read the timetable but every `INSERT` / `UPDATE` / `DELETE` and any read of `AppUser` is denied (1142); the admin role can write but has no DDL |
+| `api.test.ts` | Every route handler: login sets an httpOnly cookie, wrong password 401, a malformed body 422, every route needs a login, expired session 401, logout, unknown paths a JSON 404; faculty gets **403** on every admin route; the shapes of meta, timetable, free blocks, clashes, proposed-class check, stats; generator dry run changes nothing; substitute assign + undo; graph browser, absence and ripple; unavailability create/update/delete; Neo4j down gives 503 |
+| `validation.test.ts` | Request validation coerces and rejects query and body values (whole numbers, booleans, ranges) and reports problems as 422 errors with a `detail` list |
+| `refresh-graph.test.ts` | After a substitution the graph refresh reports a plain-English problem when Neo4j is down or out of sync, without undoing the MySQL change |
+| `db.test.ts`, `utils.test.ts` | Connection pools, `SET ROLE`, value conversions, transactions commit/roll back, stored-procedure calls, a missing `MYSQL_USER` is reported; times, lunch-aware slot links, the weekly grid, error wording, table formatting |
+| `seed.test.ts` | `sql/03_seed_data.sql` is byte-identical to what `scripts/make-seed.ts` generates |
+| `project-files.test.ts` | Required files exist and no Python is left; every setting the code reads is in `.env.example`; `.env`, `node_modules/` and `.next/` are git-ignored; `package.json` has the documented scripts; every SQL file is loaded by Docker and by CI; the README's options, `npm run` scripts, links and file names are real |
 
-**Expected result on the bundled data** (166 Python tests):
+**Expected result on the bundled data** (207 tests in 25 files: 28 `ui` + 179 `server`):
 
-| Situation | Summary line |
+| Situation | Summary lines |
 |---|---|
-| MySQL only (no Neo4j) | `152 passed, 14 skipped` |
-| + Neo4j running with the graph loaded | `165 passed, 1 skipped` |
+| MySQL only (no Neo4j) | `Test Files 24 passed \| 1 skipped (25)` · `Tests 194 passed \| 13 skipped (207)` |
+| + Neo4j running with the graph loaded (`npm run etl`) | `Test Files 25 passed (25)` · `Tests 207 passed (207)` |
 
-The one remaining skip is `test_cypher_files_have_valid_syntax`, which needs the optional `cypher-lint` tool
-(Debian/Ubuntu: `sudo apt install cypher-lint`); with it installed that test runs too.
+The 13 skips are the live-Neo4j tests (10 in `neo4j-live.test.ts`, 3 in `api.test.ts`); the run prints why
+("Neo4j not reachable ..." or "The Neo4j graph is empty. Run `npm run etl` first."). Skipped is not failed, but it also means
+**not checked**: run the Neo4j tests at least once.
 
-Skips are explained in the summary (`-ra`): "Neo4j not reachable" or "graph is empty, run the ETL".
-Skipped is not failed, but it also means **not checked**: run the Neo4j tests at least once.
+**UI tests** (`tests/ui/`, 28 tests in 9 files): the `WeekGrid` (break rows, lab colour, lines), CSV quoting,
+`BarChart`, `DataTable`, the API client (JSON errors, redirect to `/login` on 401), the login page (submits, shows
+the error on a 401), the sidebar hiding admin links for faculty, the timetable page and the absent page (Assign
+disabled until the `Teaches` box is ticked).
 
-**Web unit tests** (`web/tests/`, 28 tests in 9 files, `npm test`): the `WeekGrid` (break rows, lab colour,
-lines), CSV quoting, `BarChart`, `DataTable`, the API client (JSON errors, redirect to `/login` on 401), the login
-page (submits, shows the error on a 401), the sidebar hiding admin links for faculty, the timetable page and the
-absent page (Assign disabled until the `Teaches` box is ticked). They mock `fetch`, so no server is needed.
-
-*Do the tests really catch mistakes?* Checked by sabotage: dropping the `fk_tt_teaches` foreign key, the capacity
-trigger, the unique key on teachers, or changing the seed data each made the matching tests fail.
-The live-Neo4j tests pass against a real Neo4j 5.26.0 (verified on Arch Linux with MariaDB).
+*Do the tests really catch mistakes?* The database checks were verified by sabotage: dropping the `fk_tt_teaches`
+foreign key, the capacity trigger, the unique key on teachers, or changing the seed data each made the matching
+tests fail. (That was done on the earlier Python suite; the TypeScript tests port those checks one to one.)
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+`.github/workflows/ci.yml` runs on every pull request and every push to `main` (Node 22 with the npm cache):
 
 | Job | What it does |
 |---|---|
-| `lint` | `ruff check .`, `actionlint` on the workflow, `docker compose config`, and `bash -n` on the shell scripts |
-| `web` | Node 22: `npm ci`, `npm run lint` (type check), `npm test`, `npm run build` in `web/` |
-| `test-docker-compose` | Starts MySQL 8.0 + Neo4j 5.26 with `docker compose up -d --wait` (the Docker path above, `.env` copied from `.env.example`), runs the generator, the ETL and `neo4j_queries.py demo`, then the **whole** Python suite (Python 3.12) |
-| `test-mariadb` | Loads `sql/01` → `06` into MariaDB 11.4 with its own client, creates the service account and the two role accounts as `docker/mysql/07_role_accounts.sh` does, runs the generator and the suite (Python 3.11, no Neo4j, so the 13 Neo4j tests skip) |
+| `lint` | `npm ci`, `npm run lint` (type check), `actionlint` on the workflow, `docker compose config`, and `bash -n` on the shell scripts |
+| `test-docker-compose` | Starts MySQL 8.0 + Neo4j 5.26 with `docker compose up -d --wait` (the Docker path above, `.env` copied from `.env.example`), then `npm ci`, `npm run generate -- --replace`, `npm run etl`, `npm run queries -- demo`, the **whole** suite (`npm test`) and `npm run build` |
+| `test-mariadb` | Loads `sql/01` → `06` into MariaDB 11.4 with its own client, creates the service account and the two role accounts as `docker/mysql/07_role_accounts.sh` does, then `npm ci`, `npm run generate -- --replace` and `npm test` (no Neo4j, so the 13 Neo4j tests skip) |
 
 ## Status and limitations
 
@@ -1045,11 +1041,12 @@ The live-Neo4j tests pass against a real Neo4j 5.26.0 (verified on Arch Linux wi
 | Neo4j ETL and queries, graph RUD | Done; verified on Neo4j 5.26.0 |
 | Advanced SQL (function, CTE, recursive CTE) | Done; verified on MySQL 8.0 and MariaDB 11.4 |
 | Login, roles, SQL-level RBAC | Done; verified on MySQL 8.0 and MariaDB 11.4 |
-| API (FastAPI) and web app (Next.js) | Done; replaces the earlier Streamlit app feature for feature; API covered by `test_api.py`, web components by Vitest |
+| Web app and API (Next.js) | Done; replaces the earlier Streamlit app feature for feature; API covered by `tests/server/api.test.ts`, pages and components by `tests/ui/` |
+| TypeScript port | Done: the former Python backend (FastAPI, scheduler, ETL, CLI tools, pytest suite) was ported to TypeScript with the same API contract, messages and behaviour; no Python remains |
 | Docker Compose | Done; verified (MySQL 8.0 + Neo4j 5.26) and exercised by CI |
 | Substitute assignment | Done; tested against MySQL 8.0 and MariaDB |
-| Automated test suite | Done: 166 Python tests (165 pass with MySQL 8.0 + Neo4j 5.26, 152 need only MySQL; also green on MariaDB) and 28 web tests |
-| Continuous integration | GitHub Actions: lint, web (type check, tests, build), Python tests on MySQL 8/Neo4j 5 (docker compose) and on MariaDB 11.4 |
+| Automated test suite | Done: 207 Vitest tests (all pass with MySQL 8.0 + Neo4j 5.26; 194 pass and 13 skip with MySQL or MariaDB 11.4 alone) |
+| Continuous integration | GitHub Actions, Node only: lint (type check, actionlint, compose, shell), tests + build on MySQL 8/Neo4j 5 (docker compose), tests on MariaDB 11.4 |
 
 Known limitations (by design, for a mini-project):
 
@@ -1069,18 +1066,18 @@ Known limitations (by design, for a mini-project):
   machine, put it behind HTTPS, set the cookie to `Secure`, replace the demo passwords, `APP_SECRET` and the
   database passwords, and do not publish the database ports.
 - There is no user-management page: add or deactivate logins with SQL (`INSERT INTO AppUser ...` with a hash from
-  `python -m api.auth hash`, or `UPDATE AppUser SET is_active = FALSE ...`). There is no login rate limiting.
+  `npm run hash-password`, or `UPDATE AppUser SET is_active = FALSE ...`). There is no login rate limiting.
 - Unavailability marks live only in Neo4j (no MySQL copy), so `--reset` or a fresh Neo4j volume loses them.
 
 ## Working in a team
 
 - Copy `.env.example` to `.env` and use your own passwords. **Never commit `.env`** (it is git-ignored).
-- Run `pytest`, `ruff check .` and, for web changes, `npm run lint && npm test` in `web/` before you commit; add a
-  test with every rule you add. CI runs all of them on every pull request.
+- Run `npm run lint && npm test` (and `npm run build` for page changes) before you commit; add a test with every
+  rule you add. CI runs all of them on every pull request.
 - Change the database through **new migration files** (`sql/08_...sql`), not by editing the applied ones. Mount a new
-  file in `docker-compose.yml` and load it in the CI MariaDB job (`test_project_files.py` checks both).
-- The API contract lives in `api/main.py` (see <http://127.0.0.1:8000/docs>) and its TypeScript mirror in
-  `web/lib/types.ts`; change both together.
+  file in `docker-compose.yml` and load it in the CI MariaDB job (`tests/server/project-files.test.ts` checks both).
+- The API contract is the route handlers in `app/api/` plus the response types in `lib/types.ts` that the pages
+  use; change both together (`tests/server/api.test.ts` checks the response shapes).
 - Teammates can use different servers (MySQL vs MariaDB): everything uses standard SQL and the portable
   `source` loading command.
 - `CONTEXT.md` records decisions, the verified state and environment quirks; update it when you change

@@ -1,11 +1,11 @@
 // =====================================================================
 // queries.cypher  --  documented analytic queries on the timetable graph
 //
-// This file is the SINGLE SOURCE OF TRUTH: src/neo4j_queries.py parses the
+// This file is the SINGLE SOURCE OF TRUTH: lib/server/neo4j.ts parses the
 // "// @query <name>" markers below and runs exactly these statements, so
 // the documentation can never drift from the code.
 //
-// GRAPH MODEL (built by src/neo4j_etl.py)
+// GRAPH MODEL (built by lib/server/etl.ts, npm run etl)
 //   Nodes          Department, Faculty, Course, Section, Student, Classroom, TimeSlot
 //   Relationships  (Faculty)-[:WORKS_IN]->(Department)
 //                  (Faculty)-[:TEACHES]->(Course)            qualified to teach (Teaches table)
@@ -32,7 +32,7 @@
 //     :param day => null
 // then paste one query. Everything is Cypher 5. All queries are read-only
 // EXCEPT set_unavailability and delete_unavailability (the graph's create/
-// update/delete of UNAVAILABLE_AT marks; src/neo4j_queries.py runs those two
+// update/delete of UNAVAILABLE_AT marks; lib/server/neo4j.ts runs those two
 // in write transactions).
 // =====================================================================
 
@@ -72,7 +72,7 @@ ORDER BY day_no, period;
 //                   faculty pool). Needs a Teaches row before assignment.
 // Params: $faculty_id INT, $academic_year STRING, $day STRING or null
 // Classes with no candidate at all are simply absent from the result; the
-// Python wrapper reports them as "no substitute".
+// TypeScript wrapper reports them as "no substitute".
 MATCH (absent:Faculty {faculty_id: $faculty_id})-[:WORKS_IN]->(dept:Department)
 MATCH (c:Course)-[s:SCHEDULED_IN]->(sec:Section)
 WHERE s.faculty_id = absent.faculty_id
@@ -287,7 +287,7 @@ ORDER BY rel_type;
 // @query node_browser
 // Q13. NODE BROWSER (read): nodes of one label, optionally filtered by a
 //      case-insensitive search on the key or display name, with their degree.
-// Params: $label STRING (one of the 7 labels; validated in Python),
+// Params: $label STRING (one of the 7 labels; validated in TypeScript),
 //         $search STRING or null, $limit INT
 MATCH (n)
 WHERE $label IN labels(n)

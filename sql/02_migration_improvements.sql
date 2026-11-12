@@ -1,8 +1,8 @@
 -- =====================================================================
 -- 02_migration_improvements.sql
 -- Run ONCE, after 01_schema.sql and BEFORE the seed data.
--- Load with the mysql CLI (it uses DELIMITER, which the Python
--- connector does not understand):
+-- Load with the mysql CLI (it uses DELIMITER, which database drivers
+-- such as mysql2 do not understand):
 --     mysql -u root -p < sql/02_migration_improvements.sql
 --
 -- CHANGE LOG (every change to the PDF schema is flagged here)
@@ -79,7 +79,7 @@ ALTER TABLE Timetable
 -- [M4] + [M5] Business-rule triggers.
 -- MySQL has no combined INSERT/UPDATE trigger, so the logic lives in one
 -- procedure that both triggers call (DRY). Each failure uses its own
--- MYSQL_ERRNO so Python can tell them apart:
+-- MYSQL_ERRNO so the application can tell them apart:
 --     5001 room capacity < section strength
 --     5002 course type / room type mismatch
 --     5003 Section_Course.semester <> Section.semester
